@@ -1,133 +1,122 @@
-export const maxDuration = 60; // refresh/sync actions wait on Singular async reports
+export const maxDuration = 60; // import/sync wait on Singular async reports
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
-import { revalidatePath } from "next/cache";
 import { requireSession } from "@/lib/session";
 import { supabaseAdmin } from "@/lib/supabase/admin";
-import { trackers } from "@/lib/integrations";
-import { readCreds } from "@/lib/secrets";
 import { syncConnection } from "@/lib/sync";
-import { suggestPartner } from "@/lib/suggest";
 import { Chip } from "@/components/Chip";
+import { PageHeader } from "@/components/ui";
 import { ago } from "@/lib/format";
 
 /** Every action re-checks admin + that the connection belongs to the caller's org (RLS read via the user client). */
 async function guard(connectionId: string) {
   const s = await requireSession();
   if (!s.isAdmin) throw new Error("Admins only");
-  const { data: conn } = await s.db.from("tracker_connections").select("id,kind,vault_secret_id").eq("id", connectionId).maybeSingle();
+  const { data: conn } = await s.db.from("tracker_connections").select("id").eq("id", connectionId).maybeSingle();
   if (!conn) throw new Error("Connection not found");
-  return { ...s, conn };
+  return s;
 }
-const back = (id: string, msg?: string) => redirect(`/settings/integrations/${id}${msg ? `?msg=${encodeURIComponent(msg)}` : ""}`);
+const back = (id: string, msg?: string, view?: string) => redirect(`/settings/integrations/${id}?${new URLSearchParams({ ...(view ? { view } : {}), ...(msg ? { msg } : {}) })}`);
 
-async function refreshSources(fd: FormData) {
+async function importStructure(fd: FormData) {
   "use server";
-  const id = String(fd.get("conn")), { org, conn } = await guard(id);
-  const adapter = trackers[conn.kind as keyof typeof trackers];
-  let found;
-  try { found = await adapter.listAffiliates(await readCreds(conn.vault_secret_id)); }
-  catch (e) { back(id, `Could not load sources: ${e instanceof Error ? e.message : e}`); return; }
-  if (found.length) await supabaseAdmin().from("tracker_sources").upsert(found.map((f) => ({ org_id: org.id, connection_id: id, external_id: f.externalId, name: f.name, last_seen_at: new Date().toISOString() })), { onConflict: "connection_id,external_id" });
-  revalidatePath(`/settings/integrations/${id}`);
-  back(id, `Found ${found.length} sources`);
+  const id = String(fd.get("conn")), { member } = await guard(id);
+  const r = await syncConnection(id, 30, { autoLink: true, ownerId: member.id }).catch((e) => ({ error: e instanceof Error ? e.message : String(e) }));
+  back(id, "error" in r ? `Import failed: ${r.error}` : `Imported: ${r.createdPartners} new partners, ${r.createdLinks} new source links, ${r.rows} data rows`);
 }
-
-async function linkSource(fd: FormData) {
-  "use server";
-  const id = String(fd.get("conn")), ext = String(fd.get("ext")), partnerId = String(fd.get("partner") ?? "");
-  const { db, org } = await guard(id);
-  if (!partnerId) return back(id, "Choose a partner first");
-  const { data: p } = await db.from("partners").select("id").eq("id", partnerId).maybeSingle();   // RLS: must be in my org
-  if (!p) throw new Error("Partner not found");
-  const { error } = await supabaseAdmin().from("partner_links").insert({ org_id: org.id, partner_id: partnerId, connection_id: id, external_id: ext });
-  if (error) return back(id, error.code === "23505" ? "That source is already linked" : error.message);
-  const r = await syncConnection(id, 30).catch((e) => ({ error: e instanceof Error ? e.message : String(e) }));   // backfill so the partner page has data now
-  back(id, "error" in r ? `Linked, but the backfill failed: ${r.error}` : `Linked. Backfilled ${r.rows} rows`);
-}
-
-async function createAndLink(fd: FormData) {
-  "use server";
-  const id = String(fd.get("conn")), ext = String(fd.get("ext"));
-  const { db, org, member } = await guard(id);
-  const { data: p, error } = await db.from("partners").insert({ org_id: org.id, name: ext, type: "publisher", owner_id: member.id }).select("id").single();
-  if (error) throw new Error(error.message);
-  const { error: e2 } = await supabaseAdmin().from("partner_links").insert({ org_id: org.id, partner_id: p.id, connection_id: id, external_id: ext });
-  if (e2) return back(id, e2.message);
-  await syncConnection(id, 30).catch(() => {});
-  back(id, `Created partner "${ext}" and linked it`);
-}
-
-async function unlink(fd: FormData) {
-  "use server";
-  const id = String(fd.get("conn")), { org } = await guard(id);
-  // Deleting the link also deletes the stats synced for it (FK cascade). Relinking backfills 30 days.
-  await supabaseAdmin().from("partner_links").delete().eq("id", String(fd.get("link"))).eq("org_id", org.id).eq("connection_id", id);
-  back(id, "Unlinked");
-}
-
 async function syncNow(fd: FormData) {
   "use server";
   const id = String(fd.get("conn")); await guard(id);
   const r = await syncConnection(id, 30).catch((e) => ({ error: e instanceof Error ? e.message : String(e) }));
-  back(id, "error" in r ? `Sync failed: ${r.error}` : `Synced: ${r.sources} sources, ${r.rows} rows`);
+  back(id, "error" in r ? `Sync failed: ${r.error}` : `Synced ${r.rows} data rows across ${r.pairs} source/agency pairs`);
+}
+/** Map one Singular agency to an existing partner: links all of that agency's sources to it. */
+async function mapAgency(fd: FormData) {
+  "use server";
+  const id = String(fd.get("conn")), agency = String(fd.get("agency")), partnerId = String(fd.get("partner") ?? "");
+  const { db, org } = await guard(id);
+  if (!partnerId) return back(id, "Choose a partner first", "agency");
+  const { data: p } = await db.from("partners").select("id").eq("id", partnerId).maybeSingle();   // RLS: must be in my org
+  if (!p) throw new Error("Partner not found");
+  const admin = supabaseAdmin();
+  const { data: pairs = [] } = await admin.from("tracker_sources").select("external_id").eq("connection_id", id).eq("external_group", agency);
+  if (pairs!.length) await admin.from("partner_links").upsert(pairs!.map((x) => ({ org_id: org.id, connection_id: id, partner_id: partnerId, external_id: x.external_id, external_group: agency })), { onConflict: "connection_id,external_id,external_group" });
+  const r = await syncConnection(id, 30).catch(() => null);
+  back(id, `Mapped ${agency} to the partner (${pairs!.length} sources)${r ? "" : ". Backfill failed, try Sync"}`, "agency");
+}
+async function unlinkAgency(fd: FormData) {
+  "use server";
+  const id = String(fd.get("conn")), agency = String(fd.get("agency")), { org } = await guard(id);
+  // Deleting links also deletes the stats synced for them (FK cascade). Import or map again to backfill 30 days.
+  await supabaseAdmin().from("partner_links").delete().eq("connection_id", id).eq("org_id", org.id).eq("external_group", agency);
+  back(id, `Unlinked ${agency}`, "agency");
 }
 
-export default async function SourcesPage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ msg?: string; show?: string }> }) {
-  const { id } = await params, { msg, show } = await searchParams;
+type Pair = { external_id: string; external_group: string };
+export default async function StructurePage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ msg?: string; view?: string; q?: string }> }) {
+  const { id } = await params, { msg, view = "agency", q = "" } = await searchParams;
   const { db, isAdmin } = await requireSession();
   const { data: conn } = await db.from("tracker_connections").select("id,kind,label,status,last_synced_at").eq("id", id).maybeSingle();
   if (!conn) notFound();
-  const [{ data: sources = [] }, { data: links = [] }, { data: partners = [] }] = await Promise.all([
-    db.from("tracker_sources").select("external_id,name,last_seen_at").eq("connection_id", id).order("name"),
-    db.from("partner_links").select("id,external_id,partner:partners(id,name)").eq("connection_id", id),
+  const [{ data: pairs = [] }, { data: links = [] }, { data: partners = [] }] = await Promise.all([
+    db.from("tracker_sources").select("external_id,external_group").eq("connection_id", id).limit(20000),
+    db.from("partner_links").select("external_id,external_group,partner:partners(id,name)").eq("connection_id", id).limit(20000),
     db.from("partners").select("id,name").order("name"),
   ]);
-  const linkOf = new Map(links!.map((l: any) => [l.external_id, l]));
-  // Sources that have a link but were never catalogued (e.g. linked before this screen existed) still show up.
-  const all = [...sources!, ...links!.filter((l: any) => !sources!.some((s: any) => s.external_id === l.external_id)).map((l: any) => ({ external_id: l.external_id, name: l.external_id, last_seen_at: null }))];
-  const rows = (show === "unlinked" ? all.filter((s: any) => !linkOf.has(s.external_id)) : all);
-  const unlinkedCount = all.filter((s: any) => !linkOf.has(s.external_id)).length;
+  const partnerOf = new Map<string, { id: string; name: string }>();            // agency -> partner
+  links!.forEach((l: any) => { if (l.partner) partnerOf.set(l.external_group, l.partner); });
+  const byAgency = new Map<string, string[]>(), bySource = new Map<string, string[]>();
+  (pairs as Pair[]).forEach((p) => {
+    if (p.external_group) (byAgency.get(p.external_group) ?? byAgency.set(p.external_group, []).get(p.external_group)!).push(p.external_id);
+    (bySource.get(p.external_id) ?? bySource.set(p.external_id, []).get(p.external_id)!).push(p.external_group);
+  });
+  const needle = q.trim().toLowerCase(), hit = (s: string) => !needle || s.toLowerCase().includes(needle);
+  const agencies = [...byAgency].filter(([a, srcs]) => hit(a) || srcs.some(hit)).sort((a, b) => b[1].length - a[1].length);
+  const sources = [...bySource].filter(([s, ags]) => hit(s) || ags.some(hit)).sort((a, b) => b[1].length - a[1].length);
+  const shared = [...bySource.values()].filter((a) => a.length > 1).length;
+  const tab = (v: string, l: string) => <Link className={`tab${view === v ? " on" : ""}`} href={`?view=${v}${q ? `&q=${encodeURIComponent(q)}` : ""}`}>{l}</Link>;
 
   return (
     <>
       <p className="mut"><Link href="/settings">← Settings</Link></p>
-      <h1>{conn.label ?? conn.kind} sources</h1>
-      <p className="mut">{conn.kind} · <Chip v={conn.status} /> · last synced {ago(conn.last_synced_at)} · {links!.length} linked, {unlinkedCount} not linked</p>
-      {msg && <div className="card" role="status" style={{ marginBottom: 12 }}>{msg}</div>}
+      <PageHeader title={`${conn.label ?? conn.kind}: agencies & sources`}
+        sub={<>{byAgency.size} agencies · {bySource.size} sources · {shared} sources shared by several agencies · <Chip v={conn.status} /> · synced {ago(conn.last_synced_at)}</>} />
+      {msg && <div className="notice" role="status">{msg}</div>}
       {isAdmin && (
-        <div className="row">
-          <form action={refreshSources}><input type="hidden" name="conn" value={id} /><button>Refresh sources</button></form>
+        <div className="toolbar">
+          <form action={importStructure}><input type="hidden" name="conn" value={id} /><button className="pri">Import structure from {conn.kind}</button></form>
           <form action={syncNow}><input type="hidden" name="conn" value={id} /><button>Sync last 30 days</button></form>
-          <Link href={show === "unlinked" ? `?` : `?show=unlinked`}><button type="button">{show === "unlinked" ? "Show all" : "Show only unlinked"}</button></Link>
+          <span className="mut">Import creates a partner for each agency and links every source it works with, exactly as in {conn.kind}. Safe to repeat.</span>
         </div>
       )}
-      <div className="card"><table>
-        <thead><tr><th>Source</th><th>Last seen</th><th>Partner</th>{isAdmin && <th />}</tr></thead>
-        <tbody>{rows.map((s: any) => {
-          const l: any = linkOf.get(s.external_id), hint = l ? null : suggestPartner(s.name, partners!);
-          return (
-            <tr key={s.external_id}>
-              <td>{s.name}</td><td className="mut">{ago(s.last_seen_at)}</td>
-              <td>{l ? <Link href={`/partners/${l.partner.id}`}>{l.partner.name}</Link> : <span className="mut">Not linked{hint ? ` · looks like ${hint.name}` : ""}</span>}</td>
-              {isAdmin && <td>{l ? (
-                <form action={unlink}><input type="hidden" name="conn" value={id} /><input type="hidden" name="link" value={l.id} /><button title="Also deletes the stats synced for this source">Unlink</button></form>
-              ) : (
-                <div className="row" style={{ margin: 0 }}>
-                  <form action={linkSource} className="row" style={{ margin: 0 }}>
-                    <input type="hidden" name="conn" value={id} /><input type="hidden" name="ext" value={s.external_id} />
-                    <select name="partner" defaultValue={hint?.id ?? ""} aria-label={`Partner for ${s.name}`}>
-                      <option value="">Choose partner…</option>{partners!.map((p: any) => <option key={p.id} value={p.id}>{p.name}</option>)}
-                    </select>
-                    <button className="pri">Link</button>
-                  </form>
-                  <form action={createAndLink}><input type="hidden" name="conn" value={id} /><input type="hidden" name="ext" value={s.external_id} /><button title="Creates a publisher with this name and links it">New partner</button></form>
-                </div>)}</td>}
-            </tr>);
-        })}</tbody>
-      </table>
-      {!rows.length && <p className="mut" style={{ padding: 12 }}>No sources yet. Click “Refresh sources” to load them from {conn.kind}.</p>}
+      <div className="toolbar">
+        <div className="tabs">{tab("agency", "By agency")}{tab("source", "By source")}</div>
+        <form className="search"><input type="hidden" name="view" value={view} /><input name="q" defaultValue={q} placeholder="Search agencies or sources" /></form>
       </div>
+
+      {view === "source" ? (
+        <div className="grid2">{sources.slice(0, 200).map(([s, ags]) => (
+          <div className="card" key={s}><b>{s}</b><div className="mut">{ags.filter(Boolean).length} agenc{ags.filter(Boolean).length === 1 ? "y" : "ies"}</div>
+            <div className="chips">{ags.filter(Boolean).map((a) => partnerOf.get(a) ? <Link className="pill ok" key={a} href={`/partners/${partnerOf.get(a)!.id}`}>{a}</Link> : <span className="pill" key={a}>{a}</span>)}</div></div>))}</div>
+      ) : (
+        <div className="grid2">{agencies.slice(0, 200).map(([a, srcs]) => {
+          const p = partnerOf.get(a);
+          return (
+            <div className="card" key={a}>
+              <div className="between"><b>{a}</b>{p ? <Link className="pill ok" href={`/partners/${p.id}`}>Partner ✓</Link> : <span className="pill warn">Not linked</span>}</div>
+              <div className="mut">{srcs.length} source{srcs.length === 1 ? "" : "s"}</div>
+              <div className="chips">{srcs.slice(0, 12).map((s) => <span className="pill" key={s}>{s}{(bySource.get(s)?.length ?? 0) > 1 && <i title="Shared with other agencies"> ⇄</i>}</span>)}{srcs.length > 12 && <span className="pill mut">+{srcs.length - 12}</span>}</div>
+              {isAdmin && (p ? (
+                <form action={unlinkAgency} style={{ marginTop: 10 }}><input type="hidden" name="conn" value={id} /><input type="hidden" name="agency" value={a} /><button title="Also deletes the stats synced for this agency">Unlink</button></form>
+              ) : (
+                <form action={mapAgency} className="row" style={{ marginTop: 10, marginBottom: 0 }}><input type="hidden" name="conn" value={id} /><input type="hidden" name="agency" value={a} />
+                  <select name="partner" aria-label={`Partner for ${a}`}><option value="">Map to existing partner…</option>{partners!.map((x: any) => <option key={x.id} value={x.id}>{x.name}</option>)}</select><button>Map</button></form>
+              ))}
+            </div>);
+        })}</div>
+      )}
+      {!pairs!.length && <div className="empty"><b>Nothing here yet</b><p>Click “Import structure from {conn.kind}” to load your agencies and sources.</p></div>}
+      {(view === "source" ? sources : agencies).length > 200 && <p className="mut">Showing the first 200. Use search to narrow down.</p>}
     </>
   );
 }

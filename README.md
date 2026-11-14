@@ -6,7 +6,7 @@ Production skeleton of the ARMPIT demo: a workspace for affiliate managers (unif
 
 ## Hosted Supabase
 
-Project `armpit` (ref `nhnwzxttpncechcgqqvl`, ap-south-1) has migrations 1 to 4 applied. **Migration 5 (`tracker_sources`) is not applied yet.** Run `npx supabase db push` or paste `supabase/migrations/20261114000005_tracker_sources.sql` into the SQL editor. `.env.example` points at it; add the service-role key yourself.
+Project `armpit` (ref `nhnwzxttpncechcgqqvl`, ap-south-1) has migrations 1 to 4 applied. **Migrations 5 and 6 may not be applied yet** (`tracker_sources`, agency/source pairs, LinkedIn channel). Run `npx supabase db push` or paste `supabase/migrations/20261114000005_tracker_sources.sql` into the SQL editor. `.env.example` points at it; add the service-role key yourself.
 
 ## Run it locally
 
@@ -36,7 +36,8 @@ psql "postgresql://postgres:postgres@127.0.0.1:54322/postgres" -f supabase/seed.
 | Automations | Admin CRUD works; the cron evaluates only `no_message`. Metric-drop and cap triggers are TODO. |
 | Inbox | Reads, replies and realtime-ready schema. **Nothing is delivered to providers yet.** |
 | Singular tracker | Implemented (`trackers/singular.ts`) with a connect form in Settings, credentials in Vault, hourly sync. Request/response shapes verified against Singular's official Python client and covered by mocked tests (`npm test`) and **run live against a real Singular account** (key check plus a 7-day sync). Requests four metrics: `adn_impressions`, `custom_clicks`, `custom_installs`, `adn_cost`. `revenue` fails the whole report on accounts without revenue tracking, so it is not requested by default. |
-| Partner ↔ source linking | `/settings/integrations/[id]`: refresh sources, link to a partner (name-based suggestion), create a partner from a source, unlink, sync now. Linking backfills 30 days. Unlinking deletes that source's synced stats. Needs migration 5 (`tracker_sources`). |
+| Agencies ↔ sources (Singular) | `/settings/integrations/[id]`. Singular models this as many-to-many: a source can work with several agencies and an agency with several sources, with separate stats per (source, agency) pair. **Import structure** creates a partner per agency and links every pair; **Map** attaches an agency to an existing partner (exact-name matching only); views by agency and by source. Needs migrations 5 and 6. |
+| Inbox channels | Telegram, WhatsApp, Teams, Gmail and LinkedIn show as "API setup required" until their adapters are implemented. No placeholder data is shown. |
 | Other trackers | **Stubs** (Cellxpert, Affise, Affilka, Voonix, AppsFlyer) |
 | Channel integrations | **Stubs** in `src/lib/integrations/channels/*` (Telegram, WhatsApp, Teams, Gmail) |
 | AI agent | `POST /api/agent` answers from RLS-scoped data; no UI panel yet |

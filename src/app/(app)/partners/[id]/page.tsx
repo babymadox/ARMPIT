@@ -1,7 +1,9 @@
 import { notFound } from "next/navigation";
 import { revalidatePath } from "next/cache";
+import Link from "next/link";
 import { requireSession } from "@/lib/session";
 import { Chip } from "@/components/Chip";
+import { Avatar, Empty } from "@/components/ui";
 import { money, date, ago } from "@/lib/format";
 
 async function addNote(fd: FormData) {
@@ -12,41 +14,60 @@ async function addNote(fd: FormData) {
   revalidatePath(`/partners/${id}`);
 }
 
+// Column order and labels for the metrics Singular reports. Unknown metrics from other trackers are appended as-is.
+const COLS: [string, string, boolean][] = [["custom_installs", "Installs", false], ["custom_clicks", "Clicks", false], ["adn_impressions", "Impressions", false], ["adn_cost", "Cost", true]];
+const n = (v: number | undefined, cost = false) => v == null ? "—" : cost ? `$${v.toLocaleString("en-US", { maximumFractionDigits: 2 })}` : Math.round(v).toLocaleString("en-US");
+
 export default async function PartnerPage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ days?: string }> }) {
-  const { id } = await params; const days = Number((await searchParams).days ?? 7);
+  const { id } = await params; const days = [7, 30].includes(Number((await searchParams).days)) ? Number((await searchParams).days) : 7;
   const { db } = await requireSession();
-  const { data: p } = await db.from("partners").select("*, owner:members!owner_id(full_name), links:partner_links(id,external_id,connection:tracker_connections(kind,currency))").eq("id", id).maybeSingle();
+  const { data: p } = await db.from("partners").select("*, owner:members!owner_id(full_name), links:partner_links(id,external_id,external_group,connection:tracker_connections(id,kind))").eq("id", id).maybeSingle();
   if (!p) notFound();
   const since = new Date(Date.now() - days * 864e5).toISOString().slice(0, 10);
   const linkIds = p.links.map((l: any) => l.id);
-  // Stats stay per tracker: each link is shown with the metrics its own tracker reports.
-  const { data: stats = [] } = linkIds.length ? await db.from("tracker_stats").select("link_id,metric,value").in("link_id", linkIds).gte("day", since) : { data: [] };
+  const { data: stats = [] } = linkIds.length ? await db.from("tracker_stats").select("link_id,metric,value").in("link_id", linkIds).gte("day", since).limit(50000) : { data: [] };
   const [{ data: deals = [] }, { data: notes = [] }, { data: chats = [] }] = await Promise.all([
     db.from("deals").select("id,brand,kind,amount,rev_share_pct,status,currency").eq("partner_id", id),
     db.from("partner_notes").select("id,kind,body,created_at,author:members(full_name)").eq("partner_id", id).order("created_at", { ascending: false }),
     db.from("conversations").select("id,channel,title,last_message_at").eq("partner_id", id),
   ]);
-  const sum = (linkId: string) => Object.entries((stats ?? []).filter((s: any) => s.link_id === linkId).reduce((a: any, s: any) => ({ ...a, [s.metric]: (a[s.metric] ?? 0) + Number(s.value) }), {}));
+
+  // Per source: totals over the window. Totals row sums sources of the SAME tracker only, never across trackers.
+  const perLink = new Map<string, Record<string, number>>();
+  (stats ?? []).forEach((s: any) => { const o = perLink.get(s.link_id) ?? {}; o[s.metric] = (o[s.metric] ?? 0) + Number(s.value); perLink.set(s.link_id, o); });
+  const byTracker = new Map<string, any[]>();
+  p.links.forEach((l: any) => (byTracker.get(l.connection.kind) ?? byTracker.set(l.connection.kind, []).get(l.connection.kind)!).push(l));
 
   return (
     <>
-      <h1>{p.name}</h1>
-      <p className="mut">{p.type} · owner {p.owner?.full_name ?? "Unassigned"} · joined {date(p.joined_at)}</p>
-      <form className="row">{[7, 30].map((d) => <button key={d} name="days" value={d}>{d} days</button>)}</form>
-      <div className="grid">
-        {p.links.map((l: any) => (
-          <div className="card stat" key={l.id}><span className="mut">{l.connection.kind} · {l.external_id}</span>
-            {sum(l.id).map(([m, v]) => <div key={m}>{m}: <b style={{ display: "inline", fontSize: 16 }}>{String(v)}</b></div>)}
-            {!sum(l.id).length && <span className="mut">No data yet</span>}</div>))}
-        {!p.links.length && <div className="card mut">No tracker linked. Link one in Settings → Integrations.</div>}
-      </div>
+      <p className="mut"><Link href="/partners">← Partners</Link></p>
+      <header className="phead">
+        <div className="who-cell"><Avatar name={p.name} size={52} /><div><h1>{p.name}</h1><p className="mut" style={{ margin: 0 }}>{p.type} · owner {p.owner?.full_name ?? "Unassigned"} · joined {date(p.joined_at)}</p></div></div>
+        <div className="tabs">{[7, 30].map((d) => <Link key={d} className={`tab${days === d ? " on" : ""}`} href={`?days=${d}`}>{d} days</Link>)}</div>
+      </header>
+
+      <h2>Sources <span className="mut" style={{ fontWeight: 400, fontSize: 14 }}>{p.links.length} linked</span></h2>
+      {!p.links.length ? <Empty icon="partners" title="No sources linked">Open Settings → Integrations → your tracker, then import the structure or map this partner to an agency.</Empty> :
+        [...byTracker].map(([kind, links]) => {
+          const rows = links.map((l: any) => ({ l, m: perLink.get(l.id) ?? {} })).sort((a: any, b: any) => (b.m.custom_installs ?? 0) - (a.m.custom_installs ?? 0));
+          const tot: Record<string, number> = {}; rows.forEach((r: any) => Object.entries(r.m).forEach(([k, v]) => (tot[k] = (tot[k] ?? 0) + (v as number))));
+          return (
+            <div className="card" key={kind} style={{ marginBottom: 14 }}>
+              <table>
+                <thead><tr><th style={{ textTransform: "none", fontSize: 14, color: "var(--ink)" }}>{kind}</th>{COLS.map(([, l]) => <th key={l}>{l}</th>)}</tr></thead>
+                <tbody>{rows.map(({ l, m }: any) => <tr key={l.id}><td>{l.external_id}</td>{COLS.map(([k, , c]) => <td key={k}>{n(m[k], c)}</td>)}</tr>)}
+                  <tr><td><b>Total · {kind}</b></td>{COLS.map(([k, , c]) => <td key={k}><b>{n(tot[k], c)}</b></td>)}</tr></tbody>
+              </table>
+            </div>);
+        })}
+
       <h2>Deals</h2>
-      <div className="card"><table><tbody>{deals!.map((d: any) => <tr key={d.id}><td>{d.brand}</td><td>{d.kind}</td><td>{money(d.amount, d.currency)}</td><td><Chip v={d.status} /></td></tr>)}</tbody></table></div>
+      {!deals!.length ? <Empty icon="deals" title="No deals yet" /> : <div className="card"><table><tbody>{deals!.map((d: any) => <tr key={d.id}><td>{d.brand}</td><td>{d.kind}</td><td>{money(d.amount, d.currency)}</td><td><Chip v={d.status} /></td></tr>)}</tbody></table></div>}
       <h2>Chats</h2>
-      <div className="card">{chats!.map((c: any) => <div key={c.id}>{c.channel}: {c.title} <span className="mut">{ago(c.last_message_at)}</span></div>)}{!chats!.length && <span className="mut">No linked chats</span>}</div>
+      {!chats!.length ? <Empty icon="chat" title="No linked chats" /> : <div className="card">{chats!.map((c: any) => <div key={c.id}>{c.channel}: {c.title} <span className="mut">{ago(c.last_message_at)}</span></div>)}</div>}
       <h2>Timeline</h2>
       <form className="row" action={addNote}><input type="hidden" name="id" value={id} /><input name="body" placeholder="Add a note" style={{ flex: 1 }} required /><button className="pri">Save</button></form>
-      <div className="card">{notes!.map((n: any) => <p key={n.id}>{n.body} <span className="mut">· {n.author?.full_name} · {ago(n.created_at)}</span></p>)}</div>
+      <div className="card">{notes!.map((x: any) => <p key={x.id} style={{ margin: "6px 0" }}>{x.body} <span className="mut">· {x.author?.full_name} · {ago(x.created_at)}</span></p>)}{!notes!.length && <span className="mut">No notes yet</span>}</div>
     </>
   );
 }

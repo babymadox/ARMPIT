@@ -10,14 +10,15 @@ import type { MetricRow, TrackerAdapter } from "../types";
  *    Response: { value: { report_id } }.
  *  - GET v2.0/get_report_status?report_id=... Response: { value: { report_id, status, download_url,
  *    url_expires_in, error_message } } with status QUEUED | STARTED | DONE | FAILED.
- *  - Rows are `{ results: [...] }` with `source`, `start_date`, `end_date` and numeric metric columns.
+ *  - Rows are `{ results: [...] }` with `source`, `agency_name`, `start_date`, `end_date` and numeric metric columns.
  *  - GET v2.0/reporting/filters is a cheap authenticated call, used here to validate a key.
  *
  * Not yet exercised against a live Singular account: run one real sync before relying on it, and confirm
  * the metrics below are enabled for that account.
  */
 const BASE = "https://api.singular.net/api";
-export const DIMENSIONS = ["source"];
+// One row per (source, agency, day): Singular models agencies and sources as many-to-many, and stats are per pair.
+export const DIMENSIONS = ["source", "agency_name"];
 // Stored exactly as Singular reports them. Verified live: these four work. `revenue` fails the WHOLE report on accounts without revenue tracking, and account-specific custom metrics (e.g. custom_impressions) behave likewise, so neither is requested by default.
 export const METRICS = ["adn_impressions", "custom_clicks", "custom_installs", "adn_cost"];
 const POLL_MS = 3000, MAX_POLLS = 40;
@@ -66,8 +67,9 @@ export function makeSingular({ fetch: f = fetch, pollMs = POLL_MS }: Opts = {}):
     const out: MetricRow[] = [];
     for (const row of await runReport(key(creds), from, to)) {
       const source = row.source == null ? "" : String(row.source), day = String(row.start_date ?? "").slice(0, 10);
+      const group = row.agency_name == null ? "" : String(row.agency_name);
       if (!source || !day) continue;
-      for (const m of METRICS) if (row[m] != null) out.push({ externalId: source, day, metric: m, value: Number(row[m]) || 0 });
+      for (const m of METRICS) if (row[m] != null) out.push({ externalId: source, group, day, metric: m, value: Number(row[m]) || 0 });
     }
     return out;
   };
@@ -78,11 +80,12 @@ export function makeSingular({ fetch: f = fetch, pollMs = POLL_MS }: Opts = {}):
       try { await call(key(creds), "GET", "v2.0/reporting/filters"); return { ok: true }; }
       catch (e) { return { ok: false, error: e instanceof Error ? e.message : String(e) }; }
     },
-    /** Singular has no affiliate directory: partners are the `source` dimension, so list distinct sources from recent stats. */
+    /** Singular has no directory endpoint: list the distinct (source, agency) pairs seen in the last 30 days. */
     async listAffiliates(creds) {
       const iso = (t: number) => new Date(t).toISOString().slice(0, 10);
       const rows = await stats(creds, iso(Date.now() - 30 * 864e5), iso(Date.now()));
-      return [...new Set(rows.map((r) => r.externalId))].map((s) => ({ externalId: s, name: s }));
+      const seen = new Map(rows.map((r) => [`${r.externalId}|${r.group}`, { externalId: r.externalId, group: r.group, name: r.externalId }]));
+      return [...seen.values()];
     },
     fetchStats: stats,
   };

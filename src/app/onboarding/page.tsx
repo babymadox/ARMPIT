@@ -11,13 +11,16 @@ async function create(formData: FormData) {
 
 export default function Onboarding() {
   return (
-    <div className="center card">
-      <h1>Set up your workspace</h1>
-      <form action={create}>
-        <input name="name" placeholder="Your name" required />
-        <input name="org" placeholder="Company name" required />
-        <button className="pri">Continue</button>
-      </form>
+    <div className="auth">
+      <section className="hero"><div className="brand"><span className="logo">A</span><b style={{ color: "#fff", fontSize: 20 }}>ARMPIT</b></div><h2>Let's set up your workspace.</h2><p>It takes a few seconds. You can invite your team and connect Singular next.</p></section>
+      <section className="panel">
+        <form action={create}>
+          <h1>Your workspace</h1>
+          <input name="name" placeholder="Your name" required />
+          <input name="org" placeholder="Company name" required />
+          <button className="pri">Continue</button>
+        </form>
+      </section>
     </div>
   );
 }

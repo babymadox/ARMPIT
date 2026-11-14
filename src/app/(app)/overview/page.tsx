@@ -3,6 +3,7 @@ import Link from "next/link";
 import { requireSession } from "@/lib/session";
 import { Chip } from "@/components/Chip";
 import { date } from "@/lib/format";
+import { PageHeader, Stat, Empty } from "@/components/ui";
 
 async function setTask(fd: FormData) {
   "use server";
@@ -28,18 +29,18 @@ export default async function Overview() {
   ]);
   return (
     <>
-      <h1>Overview</h1>
-      <div className="grid" style={{ marginBottom: 16 }}>
-        <div className="card stat"><span className="mut">Unread chats</span><b>{unread.count ?? 0}</b></div>
-        <div className="card stat"><span className="mut">Payments needing attention</span><b>{payBlocked.count ?? 0}</b></div>
-        <div className="card stat"><span className="mut">Live deals</span><b>{liveDeals.count ?? 0}</b></div>
+      <PageHeader title="Overview" sub="What needs your attention today" />
+      <div className="grid">
+        <Stat label="Unread chats" value={unread.count ?? 0} icon="chat" href="/inbox" />
+        <Stat label="Payments needing attention" value={payBlocked.count ?? 0} icon="alert" tone={(payBlocked.count ?? 0) > 0 ? "warn" : "ok"} href="/payments" />
+        <Stat label="Live deals" value={liveDeals.count ?? 0} icon="deals" tone="ok" href="/deals" />
       </div>
       <h2>My tasks</h2>
       <form className="row" action={addTask}><input name="title" placeholder="New task" required style={{ flex: 1 }} /><input type="date" name="due" /><button className="pri">Add</button></form>
-      <div className="card"><table><tbody>{(tasks.data ?? []).map((t: any) => (
+      {!(tasks.data ?? []).length ? <Empty icon="check" title="You are all caught up">No open tasks assigned to you. Add one above.</Empty> : <div className="card"><table><tbody>{(tasks.data ?? []).map((t: any) => (
         <tr key={t.id}><td>{t.title}<div className="mut">{t.partner && <Link href={`/partners/${t.partner.id}`}>{t.partner.name}</Link>}</div></td>
           <td style={{ color: t.due_on && t.due_on < today ? "var(--bad)" : undefined }}>{date(t.due_on)}</td><td><Chip v={t.status} /></td>
-          <td><form action={setTask}><input type="hidden" name="id" value={t.id} /><button name="status" value="done">Done</button></form></td></tr>))}</tbody></table></div>
+          <td><form action={setTask}><input type="hidden" name="id" value={t.id} /><button name="status" value="done">Done</button></form></td></tr>))}</tbody></table></div>}
     </>
   );
 }

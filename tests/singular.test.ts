@@ -18,9 +18,10 @@ function fakeSingular(opts: { fail?: boolean } = {}) {
       return json({ value: polls < 3 ? { report_id: "r1", status: polls === 1 ? "QUEUED" : "STARTED" } : { report_id: "r1", status: "DONE", download_url: "https://files.example/r1.json" } });
     }
     if (url.startsWith("https://files.example/")) return json({ results: [
-      { source: "Facebook", start_date: "2026-11-12", end_date: "2026-11-12", custom_installs: 12, custom_clicks: 300, adn_cost: 55.5, revenue: null },
-      { source: "Unity", start_date: "2026-11-13", end_date: "2026-11-13", custom_installs: 4 },
-      { source: "", start_date: "2026-11-13", custom_installs: 9 },
+      { source: "Facebook", agency_name: "Viking Media", start_date: "2026-11-12", end_date: "2026-11-12", custom_installs: 12, custom_clicks: 300, adn_cost: 55.5, revenue: null },
+      { source: "Facebook", agency_name: "Velocity Ads", start_date: "2026-11-12", end_date: "2026-11-12", custom_installs: 3 },
+      { source: "Unity", agency_name: "Viking Media", start_date: "2026-11-13", end_date: "2026-11-13", custom_installs: 4 },
+      { source: "", agency_name: "Viking Media", start_date: "2026-11-13", custom_installs: 9 },
     ] });
     return json({}, 404);
   };
@@ -30,17 +31,21 @@ function fakeSingular(opts: { fail?: boolean } = {}) {
 test("fetchStats runs the async flow and maps rows per source/day/metric", async () => {
   const { f, calls } = fakeSingular();
   const rows = await makeSingular({ fetch: f, pollMs: 0 }).fetchStats({ api_key: "K" }, "2026-11-12", "2026-11-13");
-  assert.deepEqual(rows.filter((r) => r.externalId === "Facebook").map((r) => [r.metric, r.value]),
+  assert.deepEqual(rows.filter((r) => r.externalId === "Facebook" && r.group === "Viking Media").map((r) => [r.metric, r.value]),
     [["custom_clicks", 300], ["custom_installs", 12], ["adn_cost", 55.5]].sort((a, b) => ["adn_impressions", "custom_clicks", "custom_installs", "adn_cost", "revenue"].indexOf(a[0] as string) - ["custom_impressions", "custom_clicks", "custom_installs", "adn_cost", "revenue"].indexOf(b[0] as string)));
   assert.equal(rows.some((r) => r.metric === "revenue"), false, "null metrics are skipped");
   assert.equal(rows.some((r) => r.externalId === ""), false, "rows without a source are skipped");
   assert.equal(rows.find((r) => r.externalId === "Unity")?.day, "2026-11-13");
+  const shared = rows.filter((r) => r.externalId === "Facebook" && r.metric === "custom_installs");
+  assert.deepEqual(shared.map((r) => [r.group, r.value]).sort(), [["Velocity Ads", 3], ["Viking Media", 12]], "one source, two agencies, separate numbers");
+  assert.ok(rows.every((r) => r.group !== undefined));
   const create = calls.find((c) => c.url.includes("create_async_report"))!;
   assert.equal(create.method, "POST");
   assert.equal(create.auth, "K", "api key goes in the Authorization header");
   const p = new URLSearchParams(create.body);
   assert.equal(p.get("start_date"), "2026-11-12"); assert.equal(p.get("time_breakdown"), "day"); assert.equal(p.get("format"), "json");
   assert.ok(p.get("metrics")!.includes("custom_installs"));
+  assert.equal(p.get("dimensions"), "source,agency_name");
   assert.equal(calls.filter((c) => c.url.includes("get_report_status")).length, 3, "polls through QUEUED and STARTED until DONE");
   assert.equal(calls.at(-1)!.auth, null, "pre-signed download URL gets no Authorization header");
 });
