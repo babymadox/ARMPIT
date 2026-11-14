@@ -3,81 +3,89 @@ import type { MetricRow, TrackerAdapter } from "../types";
 /**
  * Singular (MMP) via the Reporting API: create an async report, poll its status, download the rows.
  *
- * CONFIRMED from Singular's public docs (search results): async report creation is a POST to a v2.0
- * "create_async_report" endpoint, authenticated with an `api_key` query param, taking dimensions, metrics
- * and a date range, returning a report id that you poll via "Get Report Status" for a download link.
+ * Verified against Singular's official client (github.com/singular-labs/singular_api_client, read 2026-11-14):
+ *  - Base URL https://api.singular.net/api/, auth is the `Authorization: <api_key>` header.
+ *  - POST v2.0/create_async_report with a form-encoded body: start_date, end_date (YYYY-mm-dd), dimensions,
+ *    metrics (comma separated), format (json|csv), time_breakdown (all|day|week|month), country_code_format.
+ *    Response: { value: { report_id } }.
+ *  - GET v2.0/get_report_status?report_id=... Response: { value: { report_id, status, download_url,
+ *    url_expires_in, error_message } } with status QUEUED | STARTED | DONE | FAILED.
+ *  - Rows are `{ results: [...] }` with `source`, `start_date`, `end_date` and numeric metric columns.
+ *  - GET v2.0/reporting/filters is a cheap authenticated call, used here to validate a key.
  *
- * NOT VERIFIED (docs host was unreachable when this was written): exact base URL, response field names,
- * the status string for a finished report, and the metric names. They are isolated in the constants below.
- * Verify them against a real Singular account before relying on this in production.
+ * Not yet exercised against a live Singular account: run one real sync before relying on it, and confirm
+ * the metrics below are enabled for that account.
  */
-const BASE = "https://api.singular.net/api/v2.0";
-const DIMENSIONS = ["app", "source", "country_field"];               // VERIFY: field names
-const METRICS = ["custom_impressions", "custom_clicks", "custom_installs"]; // VERIFY: add revenue / cost metrics your account exposes
-const DONE = "DONE";                                                   // VERIFY
+const BASE = "https://api.singular.net/api";
+export const DIMENSIONS = ["source"];
+// Stored exactly as Singular reports them. All five names appear in the official client's metric list; account-specific custom metrics (e.g. custom_impressions) are deliberately excluded because an unknown metric fails the whole report.
+export const METRICS = ["adn_impressions", "custom_clicks", "custom_installs", "adn_cost", "revenue"];
 const POLL_MS = 3000, MAX_POLLS = 40;
 
 type Creds = { api_key?: string };
-const need = (c: Creds) => { if (!c.api_key) throw new Error("Singular api_key missing"); return c.api_key; };
+type Opts = { fetch?: typeof fetch; pollMs?: number };
+
+const key = (c: Creds) => { if (!c.api_key) throw new Error("Singular api_key missing"); return c.api_key; };
 const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-async function createReport(key: string, from: string, to: string): Promise<string> {
-  const qs = new URLSearchParams({
-    api_key: key, start_date: from, end_date: to, time_breakdown: "day", format: "json",
-    dimensions: DIMENSIONS.join(","), metrics: METRICS.join(","),
-  });
-  const r = await fetch(`${BASE}/create_async_report?${qs}`, { method: "POST" });
-  if (!r.ok) throw new Error(`Singular create_async_report ${r.status}`);
-  const j = await r.json();
-  const id = j?.value?.report_id ?? j?.report_id;                      // VERIFY
-  if (!id) throw new Error("Singular: no report id in response");
-  return String(id);
-}
+export function makeSingular({ fetch: f = fetch, pollMs = POLL_MS }: Opts = {}): TrackerAdapter {
+  const call = async (apiKey: string, method: "GET" | "POST", path: string, form?: Record<string, string>, query?: Record<string, string>) => {
+    const url = `${BASE}/${path}${query ? `?${new URLSearchParams(query)}` : ""}`;
+    const r = await f(url, {
+      method, headers: { Authorization: apiKey, ...(form ? { "Content-Type": "application/x-www-form-urlencoded" } : {}) },
+      body: form ? new URLSearchParams(form) : undefined,
+    });
+    if (!r.ok) throw new Error(`Singular ${path} returned ${r.status}`);
+    return r.json() as Promise<{ value?: any }>;
+  };
 
-async function waitForUrl(key: string, id: string): Promise<string> {
-  for (let i = 0; i < MAX_POLLS; i++) {
-    const r = await fetch(`${BASE}/get_report_status?${new URLSearchParams({ api_key: key, report_id: id })}`);
-    if (!r.ok) throw new Error(`Singular get_report_status ${r.status}`);
-    const j = await r.json(); const v = j?.value ?? j;                  // VERIFY
-    if (v?.status === DONE && v?.download_url) return String(v.download_url);
-    if (String(v?.status).toUpperCase() === "FAILED") throw new Error("Singular report failed");
-    await wait(POLL_MS);
+  async function runReport(apiKey: string, from: string, to: string): Promise<Record<string, any>[]> {
+    const created = await call(apiKey, "POST", "v2.0/create_async_report", {
+      start_date: from, end_date: to, dimensions: DIMENSIONS.join(","), metrics: METRICS.join(","),
+      format: "json", time_breakdown: "day", country_code_format: "iso3",
+    });
+    const id = created.value?.report_id;
+    if (!id) throw new Error("Singular: no report_id in response");
+
+    for (let i = 0; i < MAX_POLLS; i++) {
+      const s = (await call(apiKey, "GET", "v2.0/get_report_status", undefined, { report_id: String(id) })).value ?? {};
+      if (s.status === "FAILED") throw new Error(`Singular report failed: ${s.error_message ?? "unknown error"}`);
+      if (s.status === "DONE") {
+        if (!s.download_url) throw new Error("Singular: report DONE without download_url");
+        const d = await f(s.download_url);                      // pre-signed URL: no Authorization header
+        if (!d.ok) throw new Error(`Singular download returned ${d.status}`);
+        const body: any = await d.json();
+        return Array.isArray(body) ? body : body?.results ?? body?.value?.results ?? [];
+      }
+      await wait(pollMs);                                       // QUEUED | STARTED
+    }
+    throw new Error("Singular report timed out");
   }
-  throw new Error("Singular report timed out");
-}
 
-export const singular: TrackerAdapter = {
-  kind: "singular",
-
-  async test(creds) {
-    try {
-      const key = need(creds), d = new Date().toISOString().slice(0, 10);
-      await createReport(key, d, d);        // a successful create proves the key works
-      return { ok: true };
-    } catch (e) { return { ok: false, error: e instanceof Error ? e.message : String(e) }; }
-  },
-
-  /** Singular has no affiliate directory: partners are the `source` dimension, so list distinct sources from recent stats. */
-  async listAffiliates(creds) {
-    const to = new Date(), from = new Date(Date.now() - 30 * 864e5);
-    const rows = await this.fetchStats(creds, from.toISOString().slice(0, 10), to.toISOString().slice(0, 10));
-    return [...new Set(rows.map((r) => r.externalId))].map((s) => ({ externalId: s, name: s }));
-  },
-
-  /** externalId = Singular `source` (the partner/network). Metrics are stored exactly as Singular reports them. */
-  async fetchStats(creds, from, to): Promise<MetricRow[]> {
-    const key = need(creds);
-    const url = await waitForUrl(key, await createReport(key, from, to));
-    const r = await fetch(url);
-    if (!r.ok) throw new Error(`Singular download ${r.status}`);
-    const body = await r.json();
-    const rows: Record<string, unknown>[] = Array.isArray(body) ? body : body?.results ?? [];  // VERIFY
+  const stats = async (creds: Creds, from: string, to: string): Promise<MetricRow[]> => {
     const out: MetricRow[] = [];
-    for (const row of rows) {
-      const source = String(row.source ?? ""), day = String(row.date ?? row.day ?? "").slice(0, 10);
+    for (const row of await runReport(key(creds), from, to)) {
+      const source = row.source == null ? "" : String(row.source), day = String(row.start_date ?? "").slice(0, 10);
       if (!source || !day) continue;
       for (const m of METRICS) if (row[m] != null) out.push({ externalId: source, day, metric: m, value: Number(row[m]) || 0 });
     }
     return out;
-  },
-};
+  };
+
+  return {
+    kind: "singular",
+    async test(creds) {
+      try { await call(key(creds), "GET", "v2.0/reporting/filters"); return { ok: true }; }
+      catch (e) { return { ok: false, error: e instanceof Error ? e.message : String(e) }; }
+    },
+    /** Singular has no affiliate directory: partners are the `source` dimension, so list distinct sources from recent stats. */
+    async listAffiliates(creds) {
+      const iso = (t: number) => new Date(t).toISOString().slice(0, 10);
+      const rows = await stats(creds, iso(Date.now() - 30 * 864e5), iso(Date.now()));
+      return [...new Set(rows.map((r) => r.externalId))].map((s) => ({ externalId: s, name: s }));
+    },
+    fetchStats: stats,
+  };
+}
+
+export const singular = makeSingular();

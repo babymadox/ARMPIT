@@ -35,7 +35,7 @@ psql "postgresql://postgres:postgres@127.0.0.1:54322/postgres" -f supabase/seed.
 | Tasks (Overview) | Working |
 | Automations | Admin CRUD works; the cron evaluates only `no_message`. Metric-drop and cap triggers are TODO. |
 | Inbox | Reads, replies and realtime-ready schema. **Nothing is delivered to providers yet.** |
-| Singular tracker | Implemented (`trackers/singular.ts`) with a connect form in Settings, credentials in Vault, hourly sync. **API details unverified**: see the `VERIFY` markers in that file and test with a real key. |
+| Singular tracker | Implemented (`trackers/singular.ts`) with a connect form in Settings, credentials in Vault, hourly sync. Request/response shapes verified against Singular's official Python client and covered by mocked tests (`npm test`); **not yet run against a live Singular account**. |
 | Other trackers | **Stubs** (Cellxpert, Affise, Affilka, Voonix, AppsFlyer) |
 | Channel integrations | **Stubs** in `src/lib/integrations/channels/*` (Telegram, WhatsApp, Teams, Gmail) |
 | AI agent | `POST /api/agent` answers from RLS-scoped data; no UI panel yet |
@@ -56,7 +56,7 @@ psql "postgresql://postgres:postgres@127.0.0.1:54322/postgres" -f supabase/seed.
 
 ## Suggested order of work
 
-1. Verify the Singular adapter against a real account, then add a UI to link partners to Singular `source` values (rows go to `partner_links`).
+1. Run the Singular adapter once with a real key (confirm the five metrics are enabled on the account), then add a UI to link partners to Singular `source` values (rows go to `partner_links`).
 2. Telegram or Gmail end to end: connect, webhook in, outbound send worker, realtime in the inbox.
 3. Invite emails, audit-log writes, notifications bell.
 4. Remaining automation triggers, deal/payment forms, Stripe billing.
