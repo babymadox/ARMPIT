@@ -6,7 +6,7 @@ Production skeleton of the ARMPIT demo: a workspace for affiliate managers (unif
 
 ## Hosted Supabase
 
-Project `armpit` (ref `nhnwzxttpncechcgqqvl`, ap-south-1) has migrations 1 to 4 applied. `.env.example` points at it; add the service-role key yourself.
+Project `armpit` (ref `nhnwzxttpncechcgqqvl`, ap-south-1) has migrations 1 to 4 applied. **Migration 5 (`tracker_sources`) is not applied yet.** Run `npx supabase db push` or paste `supabase/migrations/20261114000005_tracker_sources.sql` into the SQL editor. `.env.example` points at it; add the service-role key yourself.
 
 ## Run it locally
 
@@ -36,6 +36,7 @@ psql "postgresql://postgres:postgres@127.0.0.1:54322/postgres" -f supabase/seed.
 | Automations | Admin CRUD works; the cron evaluates only `no_message`. Metric-drop and cap triggers are TODO. |
 | Inbox | Reads, replies and realtime-ready schema. **Nothing is delivered to providers yet.** |
 | Singular tracker | Implemented (`trackers/singular.ts`) with a connect form in Settings, credentials in Vault, hourly sync. Request/response shapes verified against Singular's official Python client and covered by mocked tests (`npm test`) and **run live against a real Singular account** (key check plus a 7-day sync). Requests four metrics: `adn_impressions`, `custom_clicks`, `custom_installs`, `adn_cost`. `revenue` fails the whole report on accounts without revenue tracking, so it is not requested by default. |
+| Partner ↔ source linking | `/settings/integrations/[id]`: refresh sources, link to a partner (name-based suggestion), create a partner from a source, unlink, sync now. Linking backfills 30 days. Unlinking deletes that source's synced stats. Needs migration 5 (`tracker_sources`). |
 | Other trackers | **Stubs** (Cellxpert, Affise, Affilka, Voonix, AppsFlyer) |
 | Channel integrations | **Stubs** in `src/lib/integrations/channels/*` (Telegram, WhatsApp, Teams, Gmail) |
 | AI agent | `POST /api/agent` answers from RLS-scoped data; no UI panel yet |
@@ -56,7 +57,7 @@ psql "postgresql://postgres:postgres@127.0.0.1:54322/postgres" -f supabase/seed.
 
 ## Suggested order of work
 
-1. Add a UI to link partners to Singular `source` values (rows go to `partner_links`), and make the metric list configurable per account.
+1. Make the Singular metric list configurable per account (e.g. opt in to `revenue`).
 2. Telegram or Gmail end to end: connect, webhook in, outbound send worker, realtime in the inbox.
 3. Invite emails, audit-log writes, notifications bell.
 4. Remaining automation triggers, deal/payment forms, Stripe billing.

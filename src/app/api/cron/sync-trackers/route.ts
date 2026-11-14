@@ -1,26 +1,15 @@
 import { NextResponse } from "next/server";
-import { trackers } from "@/lib/integrations";
+import { syncConnection } from "@/lib/sync";
 import { supabaseAdmin } from "@/lib/supabase/admin";
-import { readCreds } from "@/lib/secrets";
 
-// Scheduled (Vercel Cron / Supabase pg_cron -> HTTP). Pulls the last 2 days of stats per connection.
+// Scheduled (Vercel Cron). Pulls the last 2 days for every connection; one failing connection never blocks the rest.
 export async function GET(req: Request) {
   if (req.headers.get("authorization") !== `Bearer ${process.env.CRON_SECRET}`) return new NextResponse("unauthorized", { status: 401 });
-  const db = supabaseAdmin();
-  const { data: conns = [] } = await db.from("tracker_connections").select("id,org_id,kind,vault_secret_id");
-  const to = new Date().toISOString().slice(0, 10), from = new Date(Date.now() - 2 * 864e5).toISOString().slice(0, 10);
-  let rows = 0;
+  const { data: conns = [] } = await supabaseAdmin().from("tracker_connections").select("id,kind");
+  const out: { id: string; ok: boolean; rows?: number; error?: string }[] = [];
   for (const c of conns!) {
-    const adapter = trackers[c.kind as keyof typeof trackers];
-    let stats;
-    try { stats = await adapter.fetchStats(await readCreds(c.vault_secret_id), from, to); }
-    catch (e) { await db.from("tracker_connections").update({ status: "error" }).eq("id", c.id); console.error("sync failed", c.kind, e); continue; }
-    const { data: links = [] } = await db.from("partner_links").select("id,external_id").eq("connection_id", c.id);
-    const byExt = new Map(links!.map((l) => [l.external_id, l.id]));
-    const out = stats.filter((s) => byExt.has(s.externalId)).map((s) => ({ link_id: byExt.get(s.externalId)!, org_id: c.org_id, day: s.day, metric: s.metric, value: s.value }));
-    if (out.length) await db.from("tracker_stats").upsert(out);
-    await db.from("tracker_connections").update({ last_synced_at: new Date().toISOString() }).eq("id", c.id);
-    rows += out.length;
+    try { out.push({ id: c.id, ok: true, rows: (await syncConnection(c.id)).rows }); }
+    catch (e) { console.error("sync failed", c.kind, e); out.push({ id: c.id, ok: false, error: e instanceof Error ? e.message : String(e) }); }
   }
-  return NextResponse.json({ connections: conns!.length, rows });
+  return NextResponse.json({ connections: out.length, results: out });
 }
