@@ -5,7 +5,7 @@ import { ago } from "@/lib/format";
 async function toggle(fd: FormData) {
   "use server";
   const { db } = await requireSession(); // RLS: only admins can write
-  await db.from("automations").update({ enabled: fd.get("on") === "1" }).eq("id", String(fd.get("id")));
+  { const { error: werr } = await db.from("automations").update({ enabled: fd.get("on") === "1" }).eq("id", String(fd.get("id"))); if (werr) throw new Error(werr.message); }
   revalidatePath("/automations");
 }
 async function create(fd: FormData) {
@@ -17,7 +17,7 @@ async function create(fd: FormData) {
     silent_partner: { name: "Silent partner", trigger: { type: "no_message", days: 3 }, actions: [{ type: "create_task", who: "assignee" }] },
     cap_reached: { name: "Cap almost reached", trigger: { type: "cap_pct", pct: 90 }, actions: [{ type: "notify", who: "deal_owner" }] },
   };
-  await db.from("automations").insert({ org_id: org.id, ...T[tpl] });
+  { const { error: werr } = await db.from("automations").insert({ org_id: org.id, ...T[tpl] }); if (werr) throw new Error(werr.message); }
   revalidatePath("/automations");
 }
 

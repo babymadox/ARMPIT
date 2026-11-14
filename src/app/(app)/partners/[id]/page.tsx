@@ -13,7 +13,7 @@ async function addNote(fd: FormData) {
   "use server";
   const { db, org, member } = await requireSession();
   const id = String(fd.get("id"));
-  await db.from("partner_notes").insert({ org_id: org.id, partner_id: id, body: String(fd.get("body")), author_id: member.id });
+  { const { error: werr } = await db.from("partner_notes").insert({ org_id: org.id, partner_id: id, body: String(fd.get("body")), author_id: member.id }); if (werr) throw new Error(werr.message); }
   revalidatePath(`/partners/${id}`);
 }
 

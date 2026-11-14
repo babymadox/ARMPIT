@@ -62,3 +62,9 @@ test("test() validates the key with a cheap call, and reports bad keys", async (
   assert.equal((await makeSingular({ fetch: (async () => json({}, 401)) as typeof fetch }).test({ api_key: "bad" })).ok, false);
   assert.equal((await makeSingular({ fetch: ok.f }).test({})).ok, false);
 });
+
+test("a hung Singular fails with a clear message instead of hanging", async () => {
+  const hung = (async () => { const e = new Error("aborted"); e.name = "TimeoutError"; throw e; }) as unknown as typeof fetch;
+  assert.deepEqual(await makeSingular({ fetch: hung }).test({ api_key: "K" }), { ok: false, error: "Singular did not respond in time" });
+  await assert.rejects(makeSingular({ fetch: hung, pollMs: 0 }).fetchStats({ api_key: "K" }, "2026-11-12", "2026-11-12"), /did not respond in time/);
+});

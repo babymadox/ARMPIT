@@ -9,7 +9,7 @@ export async function GET(req: Request) {
   const { data: conns = [] } = await supabaseAdmin().from("tracker_connections").select("id,kind");
   const out: { id: string; ok: boolean; rows?: number; error?: string }[] = [];
   for (const c of conns!) {
-    try { out.push({ id: c.id, ok: true, rows: (await syncConnection(c.id)).rows }); }
+    try { out.push({ id: c.id, ok: true, rows: (await syncConnection("all-orgs", c.id)).rows }); }
     catch (e) { console.error("sync failed", c.kind, e); out.push({ id: c.id, ok: false, error: e instanceof Error ? e.message : String(e) }); }
   }
   return NextResponse.json({ connections: out.length, results: out });

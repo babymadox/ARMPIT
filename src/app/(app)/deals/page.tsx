@@ -12,7 +12,7 @@ async function advance(fd: FormData) {
   const status = String(fd.get("status"));
   // Approving is an admin decision; members can only request it.
   if (["approved", "live"].includes(status) && !isAdmin) throw new Error("Only admins can approve deals");
-  await db.from("deals").update({ status }).eq("id", String(fd.get("id")));
+  { const { error: werr } = await db.from("deals").update({ status }).eq("id", String(fd.get("id"))); if (werr) throw new Error(werr.message); }
   revalidatePath("/deals");
 }
 

@@ -12,9 +12,10 @@ type Conn = { id: string; org_id: string; member_id: string; kind: string };
 export async function ingestMessages(db: SupabaseClient, conn: Conn, msgs: InboundMessage[]) {
   let stored = 0;
   for (const m of msgs) {
-    await db.from("conversations").upsert(
+    const { error: e0 } = await db.from("conversations").upsert(
       { org_id: conn.org_id, channel: conn.kind, connection_id: conn.id, external_id: m.externalConversationId, title: m.title ?? null, owner_id: conn.member_id },
       { onConflict: "org_id,channel,external_id", ignoreDuplicates: true });
+    if (e0) throw new Error(e0.message);       // the webhook answers 5xx so the provider retries
     const { data: conv, error } = await db.from("conversations").select("id").eq("org_id", conn.org_id).eq("channel", conn.kind).eq("external_id", m.externalConversationId).single();
     if (error || !conv) throw new Error(`conversation lookup failed: ${error?.message}`);
     const { data: inserted, error: e2 } = await db.from("messages").upsert(
@@ -23,7 +24,7 @@ export async function ingestMessages(db: SupabaseClient, conn: Conn, msgs: Inbou
     if (e2) throw new Error(e2.message);
     if (inserted?.length) {
       stored++;
-      await db.from("conversations").update({ unread: true, last_message_at: m.sentAt }).eq("id", conv.id).eq("org_id", conn.org_id);
+      { const { error: werr } = await db.from("conversations").update({ unread: true, last_message_at: m.sentAt }).eq("id", conv.id).eq("org_id", conn.org_id); if (werr) throw new Error(werr.message); }
     }
   }
   return stored;

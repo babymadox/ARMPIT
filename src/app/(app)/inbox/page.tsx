@@ -26,17 +26,26 @@ async function reply(fd: FormData) {
   const { data: msg, error } = await db.from("messages").insert({ org_id: org.id, conversation_id: cid, direction: "out", sender_name: "You", body, delivery_status: "pending" }).select("id").single();
   if (error || !msg) throw new Error(error?.message ?? "Could not save the message");
   const admin = supabaseAdmin();
+  const fail = async (e: unknown) => { await admin.from("messages").update({ delivery_status: "failed", error: e instanceof Error ? e.message : String(e) }).eq("id", msg.id); /* best effort: the user sees the failure either way */ };
+
+  // 1) Deliver. Only a failure HERE means "not delivered".
+  let externalId: string;
   try {
     if (!conv.connection_id) throw new Error("This chat has no channel connection");
     const { data: conn } = await admin.from("channel_connections").select("vault_secret_id,org_id").eq("id", conv.connection_id).eq("org_id", org.id).single();
     if (!conn) throw new Error("Channel connection not found");
     const adapter = (channels as Record<string, (typeof channels)[keyof typeof channels]>)[conv.channel];
-    const sent = await adapter.send(await readCreds(conn.vault_secret_id), conv.external_id, body);
-    await admin.from("messages").update({ delivery_status: "sent", external_id: sent.externalId }).eq("id", msg.id);
-  } catch (e) {
-    await admin.from("messages").update({ delivery_status: "failed", error: e instanceof Error ? e.message : String(e) }).eq("id", msg.id);
+    externalId = (await adapter.send(await readCreds(conn.vault_secret_id, org.id), conv.external_id, body)).externalId;
+  } catch (e) { await fail(e); revalidatePath("/inbox"); return; }
+
+  // 2) Record it. The partner already has the message, so a failed update must never mark it "failed"
+  //    (that invites a resend and a duplicate). Retry once; otherwise leave it pending and log.
+  for (let i = 0; i < 2; i++) {
+    const { error: upErr } = await admin.from("messages").update({ delivery_status: "sent", external_id: externalId }).eq("id", msg.id);
+    if (!upErr) break;
+    if (i === 1) console.error("message delivered but status update failed", msg.id, upErr.message);
   }
-  await db.from("conversations").update({ last_message_at: new Date().toISOString(), unread: false }).eq("id", cid);
+  await db.from("conversations").update({ last_message_at: new Date().toISOString(), unread: false }).eq("id", cid); // best effort: ordering hint only
   revalidatePath("/inbox");
 }
 
@@ -45,14 +54,20 @@ async function setPartner(fd: FormData) {
   const { db, isAdmin } = await requireSession();
   if (!isAdmin) throw new Error("Admins only");
   const pid = String(fd.get("partner") ?? "");
-  await db.from("conversations").update({ partner_id: pid || null }).eq("id", String(fd.get("c")));
+  if (pid) { const { data: p } = await db.from("partners").select("id").eq("id", pid).maybeSingle(); if (!p) throw new Error("Partner not found"); }   // RLS: must be in my workspace
+  const { error } = await db.from("conversations").update({ partner_id: pid || null }).eq("id", String(fd.get("c")));
+  if (error) throw new Error(error.message);
   revalidatePath("/inbox");
 }
 async function setOwner(fd: FormData) {
   "use server";
   const { db, isAdmin } = await requireSession();
   if (!isAdmin) throw new Error("Admins only");
-  await db.from("conversations").update({ owner_id: String(fd.get("owner")) }).eq("id", String(fd.get("c")));
+  const owner = String(fd.get("owner") ?? "");
+  const { data: m } = await db.from("members").select("id").eq("id", owner).eq("status", "active").maybeSingle();   // RLS: must be in my workspace
+  if (!m) throw new Error("Member not found");
+  const { error } = await db.from("conversations").update({ owner_id: owner }).eq("id", String(fd.get("c")));
+  if (error) throw new Error(error.message);
   revalidatePath("/inbox");
 }
 
@@ -66,7 +81,7 @@ export default async function Inbox({ searchParams }: { searchParams: Promise<{ 
   const open = c ?? chats![0]?.id;
   const current: any = chats!.find((x: any) => x.id === open);
   const { data: msgs = [] } = open ? await db.from("messages").select("id,direction,sender_name,body,sent_at,delivery_status,error").eq("conversation_id", open).order("sent_at") : { data: [] };
-  if (current?.unread) await db.from("conversations").update({ unread: false }).eq("id", open);
+  if (current?.unread) await db.from("conversations").update({ unread: false }).eq("id", open); // best effort: read marker
   const [{ data: partners = [] }, { data: members = [] }] = isAdmin && current
     ? await Promise.all([db.from("partners").select("id,name").order("name"), db.from("members").select("id,full_name,email").eq("status", "active")])
     : [{ data: [] }, { data: [] }];

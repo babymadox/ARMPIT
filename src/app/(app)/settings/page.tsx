@@ -18,7 +18,8 @@ async function connectTracker(fd: FormData) {
   const test = await adapters[kind].test(creds);                 // never save a key that does not work
   if (!test.ok) throw new Error(`Could not connect: ${test.error}`);
   const secret = await storeCreds(`${org.id}:${kind}`, creds);
-  await supabaseAdmin().from("tracker_connections").insert({ org_id: org.id, kind, label: String(fd.get("label") || kind), vault_secret_id: secret });
+  const { error } = await supabaseAdmin().from("tracker_connections").insert({ org_id: org.id, kind, label: String(fd.get("label") || kind), vault_secret_id: secret });
+  if (error) return back(`Could not save the connection: ${error.message}`);
   revalidatePath("/settings");
 }
 
@@ -39,9 +40,10 @@ async function connectTelegram(fd: FormData) {
     if (!url.startsWith("https://")) throw new Error("Telegram needs a public https address. Connect from your deployed site, not localhost.");
     const { account, creds } = await channels.telegram.connect({ bot_token: String(fd.get("token") ?? "").trim() }, url);
     const secret = await storeCreds(`${org.id}:telegram:${row.id}`, creds);
-    await supabaseAdmin().from("channel_connections").update({ vault_secret_id: secret, external_account: account, status: "connected" }).eq("id", row.id);
+    const { error: upErr } = await supabaseAdmin().from("channel_connections").update({ vault_secret_id: secret, external_account: account, status: "connected" }).eq("id", row.id);
+    if (upErr) throw new Error(upErr.message);
   } catch (e) {
-    await db.from("channel_connections").delete().eq("id", row.id);          // no half-connected state
+    await db.from("channel_connections").delete().eq("id", row.id);          // best effort: no half-connected state
     return back(`Could not connect: ${e instanceof Error ? e.message : e}`);
   }
   revalidatePath("/settings"); revalidatePath("/inbox");
@@ -50,11 +52,11 @@ async function connectTelegram(fd: FormData) {
 
 async function disconnectTelegram(fd: FormData) {
   "use server";
-  const { db, isAdmin } = await requireSession();
+  const { db, org, isAdmin } = await requireSession();
   if (!isAdmin) throw new Error("Admins only");
   const id = String(fd.get("id"));
   const { data: c } = await db.from("channel_connections").select("id,vault_secret_id").eq("id", id).maybeSingle();
-  if (c) { try { await channels.telegram.disconnect(await readCreds(c.vault_secret_id)); } catch { /* best effort */ } await db.from("channel_connections").delete().eq("id", id); }
+  if (c) { try { await channels.telegram.disconnect(await readCreds(c.vault_secret_id, org.id)); } catch { /* best effort */ } const { error } = await db.from("channel_connections").delete().eq("id", id); if (error) return back(`Could not disconnect: ${error.message}`); }
   revalidatePath("/settings"); revalidatePath("/inbox");
   back("Telegram disconnected. Existing conversations are kept.");
 }
@@ -70,7 +72,7 @@ export default async function Settings({ searchParams }: { searchParams: Promise
   const tgConn: any = tg![0];
   let tgStatus: { ok: boolean; detail: string } | null = null;
   if (tgConn && isAdmin) {   // live health check against Telegram, so a broken webhook is visible instead of silent
-    try { tgStatus = await channels.telegram.status(await readCreds(tgConn.vault_secret_id), webhookUrl(await siteOrigin(), "telegram", tgConn.id)); }
+    try { tgStatus = await channels.telegram.status(await readCreds(tgConn.vault_secret_id, org.id), webhookUrl(await siteOrigin(), "telegram", tgConn.id)); }
     catch (e) { tgStatus = { ok: false, detail: e instanceof Error ? e.message : String(e) }; }
   }
   return (

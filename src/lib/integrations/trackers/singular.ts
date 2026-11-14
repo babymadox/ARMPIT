@@ -34,9 +34,9 @@ export function makeSingular({ fetch: f = fetch, pollMs = POLL_MS }: Opts = {}):
   const call = async (apiKey: string, method: "GET" | "POST", path: string, form?: Record<string, string>, query?: Record<string, string>) => {
     const url = `${BASE}/${path}${query ? `?${new URLSearchParams(query)}` : ""}`;
     const r = await f(url, {
-      method, headers: { Authorization: apiKey, ...(form ? { "Content-Type": "application/x-www-form-urlencoded" } : {}) },
+      signal: AbortSignal.timeout(30_000), method, headers: { Authorization: apiKey, ...(form ? { "Content-Type": "application/x-www-form-urlencoded" } : {}) },
       body: form ? new URLSearchParams(form) : undefined,
-    });
+    }).catch((e) => { throw new Error((e as Error)?.name === "TimeoutError" ? "Singular did not respond in time" : "Could not reach Singular"); });
     if (!r.ok) throw new Error(`Singular ${path} returned ${r.status}`);
     return r.json() as Promise<{ value?: any }>;
   };
@@ -54,7 +54,7 @@ export function makeSingular({ fetch: f = fetch, pollMs = POLL_MS }: Opts = {}):
       if (s.status === "FAILED") throw new Error(`Singular report failed: ${s.error_message ?? "unknown error"}`);
       if (s.status === "DONE") {
         if (!s.download_url) throw new Error("Singular: report DONE without download_url");
-        const d = await f(s.download_url);                      // pre-signed URL: no Authorization header
+        const d = await f(s.download_url, { signal: AbortSignal.timeout(45_000) }).catch((e) => { throw new Error((e as Error)?.name === "TimeoutError" ? "Singular download timed out" : "Could not download the Singular report"); });   // pre-signed URL: no Authorization header
         if (!d.ok) throw new Error(`Singular download returned ${d.status}`);
         const body: any = await d.json();
         return Array.isArray(body) ? body : body?.results ?? body?.value?.results ?? [];

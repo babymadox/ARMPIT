@@ -6,6 +6,9 @@ import { planImport, type Pair } from "./structure";
 const iso = (ms: number) => new Date(ms).toISOString().slice(0, 10);
 const chunks = <T,>(a: T[], n = 1000) => Array.from({ length: Math.ceil(a.length / n) }, (_, i) => a.slice(i * n, i * n + n));
 
+/** Who is asking: one workspace (user-triggered) or the scheduled job (all workspaces). */
+export type Scope = { orgId: string } | "all-orgs";
+
 type Opts = {
   /** Create partners for new agencies and link every (source, agency) pair, mirroring the tracker. Admin-triggered only. */
   autoLink?: boolean;
@@ -19,21 +22,23 @@ type Opts = {
  *  3. stores stats for linked pairs only. A pair carries its own numbers, so a source shared by two agencies
  *     is never double counted.
  */
-export async function syncConnection(connectionId: string, days = 2, opts: Opts = {}) {
+export async function syncConnection(scope: Scope, connectionId: string, days = 2, opts: Opts = {}) {
   const db = supabaseAdmin();
   const { data: c, error } = await db.from("tracker_connections").select("id,org_id,kind,vault_secret_id").eq("id", connectionId).single();
   if (error || !c) throw new Error("connection not found");
+  if (scope !== "all-orgs" && c.org_id !== scope.orgId) throw new Error("connection not found");   // never act on another workspace's connection
   const adapter = trackers[c.kind as keyof typeof trackers];
   let stats;
-  try { stats = await adapter.fetchStats(await readCreds(c.vault_secret_id), iso(Date.now() - days * 864e5), iso(Date.now())); }
-  catch (e) { await db.from("tracker_connections").update({ status: "error" }).eq("id", c.id); throw e; }
+  try { stats = await adapter.fetchStats(await readCreds(c.vault_secret_id, c.org_id), iso(Date.now() - days * 864e5), iso(Date.now())); }
+  catch (e) { await db.from("tracker_connections").update({ status: "error" }).eq("id", c.id); /* best effort: the sync error below is what matters */ throw e; }
 
   const pairMap = new Map<string, Pair>();
   for (const s of stats) pairMap.set(`${s.externalId}|${s.group ?? ""}`, { source: s.externalId, agency: s.group ?? "" });
   const pairs = [...pairMap.values()];
   const now = new Date().toISOString();
   for (const part of chunks(pairs)) {
-    await db.from("tracker_sources").upsert(part.map((p) => ({ org_id: c.org_id, connection_id: c.id, external_id: p.source, external_group: p.agency, name: p.source, last_seen_at: now })), { onConflict: "connection_id,external_id,external_group" });
+    const { error: e } = await db.from("tracker_sources").upsert(part.map((p) => ({ org_id: c.org_id, connection_id: c.id, external_id: p.source, external_group: p.agency, name: p.source, last_seen_at: now })), { onConflict: "connection_id,external_id,external_group" });
+    if (e) throw new Error(`Could not save sources: ${e.message}`);
   }
 
   let createdPartners = 0, createdLinks = 0;
@@ -62,6 +67,7 @@ export async function syncConnection(connectionId: string, days = 2, opts: Opts 
   const byPair = new Map(links!.map((l) => [`${l.external_id}|${l.external_group}`, l.id]));
   const rows = stats.filter((s) => byPair.has(`${s.externalId}|${s.group ?? ""}`)).map((s) => ({ link_id: byPair.get(`${s.externalId}|${s.group ?? ""}`)!, org_id: c.org_id, day: s.day, metric: s.metric, value: s.value }));
   for (const part of chunks(rows)) { const { error: e } = await db.from("tracker_stats").upsert(part); if (e) throw new Error(e.message); }
-  await db.from("tracker_connections").update({ last_synced_at: now, status: "connected" }).eq("id", c.id);
+  const { error: e5 } = await db.from("tracker_connections").update({ last_synced_at: now, status: "connected" }).eq("id", c.id);
+  if (e5) throw new Error(`Could not record sync: ${e5.message}`);
   return { pairs: pairs.length, rows: rows.length, createdPartners, createdLinks };
 }

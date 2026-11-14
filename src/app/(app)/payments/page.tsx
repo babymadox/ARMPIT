@@ -9,7 +9,7 @@ const FLOW = ["waiting_for_data", "ready", "invoiced", "approved", "paid", "conf
 async function setStatus(fd: FormData) {
   "use server";
   const { db } = await requireSession();
-  await db.from("payments").update({ status: String(fd.get("status")) }).eq("id", String(fd.get("id")));
+  { const { error: werr } = await db.from("payments").update({ status: String(fd.get("status")) }).eq("id", String(fd.get("id"))); if (werr) throw new Error(werr.message); }
   revalidatePath("/payments");
 }
 

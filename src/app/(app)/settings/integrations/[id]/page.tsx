@@ -20,14 +20,14 @@ const back = (id: string, msg?: string, view?: string) => redirect(`/settings/in
 
 async function importStructure(fd: FormData) {
   "use server";
-  const id = String(fd.get("conn")), { member } = await guard(id);
-  const r = await syncConnection(id, 30, { autoLink: true, ownerId: member.id }).catch((e) => ({ error: e instanceof Error ? e.message : String(e) }));
+  const id = String(fd.get("conn")), { member, org } = await guard(id);
+  const r = await syncConnection({ orgId: org.id }, id, 30, { autoLink: true, ownerId: member.id }).catch((e) => ({ error: e instanceof Error ? e.message : String(e) }));
   back(id, "error" in r ? `Import failed: ${r.error}` : `Imported: ${r.createdPartners} new partners, ${r.createdLinks} new source links, ${r.rows} data rows`);
 }
 async function syncNow(fd: FormData) {
   "use server";
-  const id = String(fd.get("conn")); await guard(id);
-  const r = await syncConnection(id, 30).catch((e) => ({ error: e instanceof Error ? e.message : String(e) }));
+  const id = String(fd.get("conn")), { org } = await guard(id);
+  const r = await syncConnection({ orgId: org.id }, id, 30).catch((e) => ({ error: e instanceof Error ? e.message : String(e) }));
   back(id, "error" in r ? `Sync failed: ${r.error}` : `Synced ${r.rows} data rows across ${r.pairs} source/agency pairs`);
 }
 /** Map one Singular agency to an existing partner: links all of that agency's sources to it. */
@@ -39,16 +39,20 @@ async function mapAgency(fd: FormData) {
   const { data: p } = await db.from("partners").select("id").eq("id", partnerId).maybeSingle();   // RLS: must be in my org
   if (!p) throw new Error("Partner not found");
   const admin = supabaseAdmin();
-  const { data: pairs = [] } = await admin.from("tracker_sources").select("external_id").eq("connection_id", id).eq("external_group", agency);
-  if (pairs!.length) await admin.from("partner_links").upsert(pairs!.map((x) => ({ org_id: org.id, connection_id: id, partner_id: partnerId, external_id: x.external_id, external_group: agency })), { onConflict: "connection_id,external_id,external_group" });
-  const r = await syncConnection(id, 30).catch(() => null);
+  const { data: pairs = [], error: e1 } = await admin.from("tracker_sources").select("external_id").eq("org_id", org.id).eq("connection_id", id).eq("external_group", agency);
+  if (e1) return back(id, `Could not read sources: ${e1.message}`, "agency");
+  if (!pairs!.length) return back(id, `No sources found for ${agency}`, "agency");
+  const { error: e2 } = await admin.from("partner_links").upsert(pairs!.map((x) => ({ org_id: org.id, connection_id: id, partner_id: partnerId, external_id: x.external_id, external_group: agency })), { onConflict: "connection_id,external_id,external_group" });
+  if (e2) return back(id, `Could not map ${agency}: ${e2.message}`, "agency");   // never report success for a failed write
+  const r = await syncConnection({ orgId: org.id }, id, 30).catch(() => null);
   back(id, `Mapped ${agency} to the partner (${pairs!.length} sources)${r ? "" : ". Backfill failed, try Sync"}`, "agency");
 }
 async function unlinkAgency(fd: FormData) {
   "use server";
   const id = String(fd.get("conn")), agency = String(fd.get("agency")), { org } = await guard(id);
   // Deleting links also deletes the stats synced for them (FK cascade). Import or map again to backfill 30 days.
-  await supabaseAdmin().from("partner_links").delete().eq("connection_id", id).eq("org_id", org.id).eq("external_group", agency);
+  const { error } = await supabaseAdmin().from("partner_links").delete().eq("connection_id", id).eq("org_id", org.id).eq("external_group", agency);
+  if (error) return back(id, `Could not unlink ${agency}: ${error.message}`, "agency");
   back(id, `Unlinked ${agency}`, "agency");
 }
 

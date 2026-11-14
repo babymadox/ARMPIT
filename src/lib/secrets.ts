@@ -6,9 +6,11 @@ export async function storeCreds(name: string, creds: Record<string, string>) {
   if (error) throw new Error(error.message);
   return data as string;
 }
-export async function readCreds(secretId: string | null): Promise<Record<string, string>> {
+/** Reads credentials only if they were stored by `orgId` (secret names start with the workspace id). */
+export async function readCreds(secretId: string | null, orgId: string): Promise<Record<string, string>> {
   if (!secretId) return {};
-  const { data, error } = await supabaseAdmin().rpc("read_secret", { secret_id: secretId });
+  const { data, error } = await supabaseAdmin().rpc("read_secret_for_org", { secret_id: secretId, org: orgId });
   if (error) throw new Error(error.message);
+  if (data == null) throw new Error("Credentials not found for this workspace");
   return JSON.parse(data as string);
 }

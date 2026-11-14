@@ -8,13 +8,13 @@ import { PageHeader, Stat, Empty } from "@/components/ui";
 async function setTask(fd: FormData) {
   "use server";
   const { db } = await requireSession();
-  await db.from("tasks").update({ status: String(fd.get("status")) }).eq("id", String(fd.get("id")));
+  { const { error: werr } = await db.from("tasks").update({ status: String(fd.get("status")) }).eq("id", String(fd.get("id"))); if (werr) throw new Error(werr.message); }
   revalidatePath("/overview");
 }
 async function addTask(fd: FormData) {
   "use server";
   const { db, org, member } = await requireSession();
-  await db.from("tasks").insert({ org_id: org.id, title: String(fd.get("title")), assignee_id: member.id, due_on: String(fd.get("due") || "") || null });
+  { const { error: werr } = await db.from("tasks").insert({ org_id: org.id, title: String(fd.get("title")), assignee_id: member.id, due_on: String(fd.get("due") || "") || null }); if (werr) throw new Error(werr.message); }
   revalidatePath("/overview");
 }
 

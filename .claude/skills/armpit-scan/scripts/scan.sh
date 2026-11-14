@@ -88,7 +88,23 @@ for c in pathlib.Path("src/app/api/cron").rglob("route.ts"):
     ok = "CRON_SECRET" in c.read_text()
     print(f"{G}  {c.parent.name} requires CRON_SECRET" if ok else f"{R}  {c} has no CRON_SECRET check"); fails += not ok
 
-# 10. leftovers
+# 10. database writes whose result is thrown away (a failed write would still look like success).
+#     Mark deliberate ones with a "best effort" comment on the same line.
+disc = []
+wr = re.compile(r'(^\s*|\)\s*|\{\s*|;\s*)await [^=;]*?\.(insert|upsert|update|delete)\(')
+for f in files:
+    for n, line in enumerate(pathlib.Path(f).read_text().split("\n"), 1):
+        if wr.search(line) and "best effort" not in line and "supabaseAdmin()" not in line.split("await")[0]:
+            disc.append(f"{f}:{n}: {line.strip()[:110]}")
+print(f"{G}  no unreviewed discarded database writes" if not disc else f"{R}  database writes with the result ignored (check the error, or add a 'best effort' comment if deliberate):\n    " + "\n    ".join(disc)); fails += bool(disc)
+
+# 11. user-triggered syncs must be scoped to a workspace; credentials must be read per workspace
+bare = [f"{f}" for f in files if re.search(r'syncConnection\(\s*(?!\{ orgId|"all-orgs"|scope)', pathlib.Path(f).read_text()) and not f.endswith("lib/sync.ts")]
+print(f"{G}  every syncConnection call names its scope (workspace or all-orgs)" if not bare else f"{R}  syncConnection called without a scope: {bare}"); fails += bool(bare)
+old = [f for f in files if re.search(r'readCreds\([^,()]*\)', pathlib.Path(f).read_text())]
+print(f"{G}  readCreds always receives a workspace id" if not old else f"{R}  readCreds called without a workspace id: {old}"); fails += bool(old)
+
+# 12. leftovers
 todo = sh(r"grep -rnE 'TODO|FIXME|VERIFY|XXX' src supabase --include=*.ts --include=*.tsx --include=*.sql | wc -l").strip()
 print(f"{Y}  {todo} TODO/FIXME/VERIFY markers (list: grep -rnE 'TODO|FIXME|VERIFY' src supabase)")
 stubs = sh(r"grep -rlE 'not implemented yet|is not set up yet' src | wc -l").strip()

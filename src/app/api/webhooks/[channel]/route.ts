@@ -22,7 +22,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ channel
   if (!conn) return NextResponse.json({ error: "not found" }, { status: 404 });
 
   let msgs;
-  try { msgs = await adapter.parseWebhook(req, await readCreds(conn.vault_secret_id)); }
+  try { msgs = await adapter.parseWebhook(req, await readCreds(conn.vault_secret_id, conn.org_id)); }
   catch { return NextResponse.json({ error: "unauthorized" }, { status: 401 }); }   // bad secret: say nothing more
 
   try { await ingestMessages(db, conn, msgs); }

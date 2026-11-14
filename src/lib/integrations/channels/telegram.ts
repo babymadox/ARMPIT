@@ -12,11 +12,11 @@ export const MAX_TEXT = 4096;
 
 type Opts = { fetch?: typeof fetch; secret?: () => string };
 
-async function call<T>(f: typeof fetch, token: string, method: string, payload?: unknown): Promise<T> {
+async function call<T>(f: typeof fetch, token: string, method: string, payload?: unknown, timeoutMs = 10_000): Promise<T> {
   let res: Response;
   try {
-    res = await f(`${API}/bot${token}/${method}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(payload ?? {}) });
-  } catch { throw new Error("Could not reach Telegram"); }
+    res = await f(`${API}/bot${token}/${method}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(payload ?? {}), signal: AbortSignal.timeout(timeoutMs) });
+  } catch (e) { throw new Error((e as Error)?.name === "TimeoutError" ? "Telegram did not respond in time" : "Could not reach Telegram"); }
   const j: any = await res.json().catch(() => ({}));
   if (!res.ok || !j.ok) throw new Error(j.description ? `Telegram: ${j.description}` : `Telegram returned ${res.status}`);
   return j.result as T;
@@ -58,7 +58,7 @@ export function makeTelegram({ fetch: f = fetch, secret = () => crypto.randomUUI
 
     async status(creds, webhookUrl) {
       try {
-        const w = await call<{ url: string; last_error_message?: string; pending_update_count: number }>(f, token(creds), "getWebhookInfo");
+        const w = await call<{ url: string; last_error_message?: string; pending_update_count: number }>(f, token(creds), "getWebhookInfo", undefined, 5_000);   // runs on every Settings load: fail fast
         if (w.url !== webhookUrl) return { ok: false, detail: "Webhook points somewhere else. Disconnect and reconnect." };
         if (w.last_error_message) return { ok: false, detail: `Telegram could not deliver: ${w.last_error_message}` };
         return { ok: true, detail: w.pending_update_count ? `Working (${w.pending_update_count} waiting)` : "Working" };

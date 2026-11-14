@@ -30,7 +30,10 @@ It prints PASS / WARN / FAIL per check. Treat every WARN as a lead to read, not 
 4. **Tracker numbers are per tracker, as reported.** Never sum across trackers; ratios are computed from totals (`columns.ts`).
 5. **Singular:** a (source, agency) pair carries its own stats; unsupported metrics fail the whole report, so only metrics in `singular-metrics.ts` are requested.
 6. **Webhook ingest is idempotent** and never overwrites a chat's owner or linked partner.
-7. **Deletes that cascade** (unlinking an agency deletes its stats) must say so in the UI.
+7. **Writes check their result.** A failed insert/update/delete must surface as an error, never as a success message. Deliberate fire-and-forget writes carry a `best effort` comment (the scan enforces this).
+8. **Workspace scoping in code:** `syncConnection(scope, ...)` takes `{ orgId }` or `"all-orgs"` (cron only); `readCreds(secretId, orgId)` only returns secrets stored under that workspace. The DB trigger `enforce_same_org` blocks rows that point at another workspace's partner/member/connection.
+9. **Provider calls have timeouts** and map timeouts to readable messages; page loads must not wait on a slow provider.
+10. **Deletes that cascade** (unlinking an agency deletes its stats) must say so in the UI.
 
 ## 4. Verification discipline
 - Run `npx tsc --noEmit`, `npm test`, and `NEXT_PUBLIC_SUPABASE_URL=http://x NEXT_PUBLIC_SUPABASE_ANON_KEY=x npx next build` after `rm -rf .next` (stale `.next` types cause false failures).
@@ -38,7 +41,7 @@ It prints PASS / WARN / FAIL per check. Treat every WARN as a lead to read, not 
 - Anything needing live providers (Singular, Telegram) is **unverified** unless you actually called them; say so.
 
 ## 5. Known gaps (update this list when they change)
-Invite emails, Stripe billing, audit-log writes, notifications UI, deal/payment forms, WhatsApp/Teams/Gmail/LinkedIn adapters, other tracker adapters, per-account Singular metric detection, pagination on large source lists.
+Duplicate guards (two Telegram connections / double import can create duplicates), "silent partner" counts a partner as silent if any one chat is quiet, invite emails, Stripe billing, audit-log writes, notifications UI, deal/payment forms, WhatsApp/Teams/Gmail/LinkedIn adapters, other tracker adapters, per-account Singular metric detection, pagination on large source lists.
 
 ## 6. Report format
 Group by severity (Security, Correctness, Drift/maintainability). For each: file:line, what is wrong, evidence, suggested fix. End with what you did **not** check.

@@ -65,3 +65,13 @@ test("status flags a webhook that points elsewhere or reports delivery errors", 
   assert.equal((await mk({ url: "https://other" }).status(creds, "https://app.test/h")).ok, false);
   assert.match((await mk({ url: "https://app.test/h", last_error_message: "Connection timed out" }).status(creds, "https://app.test/h")).detail, /timed out/);
 });
+
+test("a hung Telegram fails fast with a clear message, and every call carries a timeout", async () => {
+  const signals: (AbortSignal | undefined)[] = [];
+  const hung = (async (_u: string, init: any) => { signals.push(init.signal); const e = new Error("aborted"); e.name = "TimeoutError"; throw e; }) as unknown as typeof fetch;
+  await assert.rejects(makeTelegram({ fetch: hung }).send(creds, "1", "hi"), /Telegram did not respond in time/);
+  assert.equal((await makeTelegram({ fetch: hung }).status(creds, "https://x")).detail, "Telegram did not respond in time");
+  assert.ok(signals.length === 2 && signals.every((s) => s instanceof AbortSignal), "timeout signal passed on every call");
+  const down = (async () => { throw new TypeError("fetch failed"); }) as unknown as typeof fetch;
+  await assert.rejects(makeTelegram({ fetch: down }).send(creds, "1", "hi"), /Could not reach Telegram/);
+});
