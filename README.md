@@ -6,7 +6,7 @@ Production skeleton of the ARMPIT demo: a workspace for affiliate managers (unif
 
 ## Hosted Supabase
 
-Project `armpit` (ref `nhnwzxttpncechcgqqvl`, ap-south-1) has migrations 1 to 4 applied. **Migrations 5 and 6 may not be applied yet** (`tracker_sources`, agency/source pairs, LinkedIn channel). Run `npx supabase db push` or paste `supabase/migrations/20261114000005_tracker_sources.sql` into the SQL editor. `.env.example` points at it; add the service-role key yourself.
+The Supabase project (ref `nhnwzxttpncechcgqqvl`, ap-south-1) has migrations 1 to 4 applied. **Migrations 5 and 6 may not be applied yet** (`tracker_sources`, agency/source pairs, LinkedIn channel). Run `npx supabase db push` or paste `supabase/migrations/20261114000005_tracker_sources.sql` into the SQL editor. `.env.example` points at it; add the service-role key yourself.
 
 ## Run it locally
 
