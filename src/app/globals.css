@@ -1,0 +1,17 @@
+:root{--bg:#f7f8fa;--card:#fff;--ink:#0f172a;--mut:#64748b;--line:#e2e8f0;--brand:#6d28d9;--ok:#10b981;--bad:#dc2626}
+@media (prefers-color-scheme:dark){:root{--bg:#0b1020;--card:#121a2e;--ink:#e5e9f5;--mut:#94a3b8;--line:#233050}}
+*{box-sizing:border-box}body{margin:0;font:16px/1.45 Inter,system-ui,sans-serif;background:var(--bg);color:var(--ink)}
+a{color:inherit;text-decoration:none}.shell{display:grid;grid-template-columns:220px 1fr;min-height:100vh}
+nav.side{background:var(--card);border-right:1px solid var(--line);padding:16px;display:flex;flex-direction:column;gap:4px}
+nav.side a{padding:8px 12px;border-radius:8px;color:var(--mut)}nav.side a:hover,nav.side a.on{background:var(--bg);color:var(--ink)}
+nav.side b{padding:4px 12px 12px;font-size:18px}main{padding:24px;max-width:1200px;width:100%}
+h1{font-size:24px;margin:0 0 16px}.card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:16px}
+table{width:100%;border-collapse:collapse}th,td{text-align:left;padding:10px 12px;border-bottom:1px solid var(--line);font-size:14px}th{color:var(--mut);font-weight:500}
+.chip{display:inline-block;padding:2px 10px;border-radius:99px;font-size:12px;background:color-mix(in srgb,var(--c,#94a3b8) 18%,transparent);color:var(--c,#94a3b8)}
+.grid{display:grid;gap:12px;grid-template-columns:repeat(auto-fit,minmax(200px,1fr))}.stat b{display:block;font-size:28px}.mut{color:var(--mut)}
+input,select,textarea,button{font:inherit;padding:8px 12px;border:1px solid var(--line);border-radius:8px;background:var(--card);color:var(--ink)}
+button.pri{background:var(--brand);color:#fff;border-color:var(--brand);cursor:pointer}form.row{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px}
+.board{display:grid;grid-auto-flow:column;grid-auto-columns:240px;gap:12px;overflow-x:auto}.col h3{font-size:14px;margin:0 0 8px}
+.msg{padding:8px 12px;border-radius:12px;margin:6px 0;max-width:70%;background:var(--bg)}.msg.out{margin-left:auto;background:color-mix(in srgb,var(--brand) 15%,var(--card))}
+.split{display:grid;grid-template-columns:320px 1fr;gap:12px}.center{max-width:380px;margin:12vh auto}.center form{display:grid;gap:10px}
+@media(max-width:800px){.shell,.split{grid-template-columns:1fr}nav.side{flex-direction:row;overflow-x:auto}}
