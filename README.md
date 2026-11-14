@@ -62,3 +62,10 @@ psql "postgresql://postgres:postgres@127.0.0.1:54322/postgres" -f supabase/seed.
 3. Invite emails, audit-log writes, notifications bell.
 4. Remaining automation triggers, deal/payment forms, Stripe billing.
 5. Hardening: rate limits, Sentry, backups, tests (RLS tests first), CI, staging project.
+
+## Deploy (Vercel)
+
+1. Import the GitHub repo in Vercel (framework: Next.js, no build settings to change).
+2. Environment variables: `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`, `CRON_SECRET`.
+3. Supabase → Authentication → URL Configuration: set Site URL to the Vercel URL and add it to Redirect URLs.
+4. `vercel.json` crons run daily so the Hobby plan accepts them; on Pro, raise the frequency (sync hourly, automations every 15 min) and `maxDuration`.

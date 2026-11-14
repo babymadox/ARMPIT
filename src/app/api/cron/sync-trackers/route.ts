@@ -1,3 +1,4 @@
+export const maxDuration = 60; // Singular reports are async; allow time to poll (raise on Pro)
 import { NextResponse } from "next/server";
 import { syncConnection } from "@/lib/sync";
 import { supabaseAdmin } from "@/lib/supabase/admin";

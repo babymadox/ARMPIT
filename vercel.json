@@ -1,4 +1,4 @@
 { "crons": [
-  { "path": "/api/cron/sync-trackers", "schedule": "0 * * * *" },
-  { "path": "/api/cron/automations",   "schedule": "*/15 * * * *" }
+  { "path": "/api/cron/sync-trackers", "schedule": "0 3 * * *" },
+  { "path": "/api/cron/automations",   "schedule": "30 3 * * *" }
 ] }
