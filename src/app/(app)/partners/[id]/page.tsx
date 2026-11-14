@@ -5,6 +5,9 @@ import { requireSession } from "@/lib/session";
 import { Chip } from "@/components/Chip";
 import { Avatar, Empty } from "@/components/ui";
 import { money, date, ago } from "@/lib/format";
+import { cookies } from "next/headers";
+import { ColumnPicker } from "@/components/ColumnPicker";
+import { catalogFor, cookieName, formatValue, parseSelection, valueOf, type Totals } from "@/lib/columns";
 
 async function addNote(fd: FormData) {
   "use server";
@@ -14,12 +17,10 @@ async function addNote(fd: FormData) {
   revalidatePath(`/partners/${id}`);
 }
 
-// Column order and labels for the metrics Singular reports. Unknown metrics from other trackers are appended as-is.
-const COLS: [string, string, boolean][] = [["custom_installs", "Installs", false], ["custom_clicks", "Clicks", false], ["adn_impressions", "Impressions", false], ["adn_cost", "Cost", true]];
-const n = (v: number | undefined, cost = false) => v == null ? "—" : cost ? `$${v.toLocaleString("en-US", { maximumFractionDigits: 2 })}` : Math.round(v).toLocaleString("en-US");
 
-export default async function PartnerPage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ days?: string }> }) {
-  const { id } = await params; const days = [7, 30].includes(Number((await searchParams).days)) ? Number((await searchParams).days) : 7;
+export default async function PartnerPage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ days?: string; sort?: string }> }) {
+  const { id } = await params; const sp = await searchParams; const days = [7, 30].includes(Number(sp.days)) ? Number(sp.days) : 7;
+  const jar = await cookies();
   const { db } = await requireSession();
   const { data: p } = await db.from("partners").select("*, owner:members!owner_id(full_name), links:partner_links(id,external_id,external_group,connection:tracker_connections(id,kind))").eq("id", id).maybeSingle();
   if (!p) notFound();
@@ -33,7 +34,7 @@ export default async function PartnerPage({ params, searchParams }: { params: Pr
   ]);
 
   // Per source: totals over the window. Totals row sums sources of the SAME tracker only, never across trackers.
-  const perLink = new Map<string, Record<string, number>>();
+  const perLink = new Map<string, Totals>();
   (stats ?? []).forEach((s: any) => { const o = perLink.get(s.link_id) ?? {}; o[s.metric] = (o[s.metric] ?? 0) + Number(s.value); perLink.set(s.link_id, o); });
   const byTracker = new Map<string, any[]>();
   p.links.forEach((l: any) => (byTracker.get(l.connection.kind) ?? byTracker.set(l.connection.kind, []).get(l.connection.kind)!).push(l));
@@ -49,15 +50,25 @@ export default async function PartnerPage({ params, searchParams }: { params: Pr
       <h2>Sources <span className="mut" style={{ fontWeight: 400, fontSize: 14 }}>{p.links.length} linked</span></h2>
       {!p.links.length ? <Empty icon="partners" title="No sources linked">Open Settings → Integrations → your tracker, then import the structure or map this partner to an agency.</Empty> :
         [...byTracker].map(([kind, links]) => {
-          const rows = links.map((l: any) => ({ l, m: perLink.get(l.id) ?? {} })).sort((a: any, b: any) => (b.m.custom_installs ?? 0) - (a.m.custom_installs ?? 0));
-          const tot: Record<string, number> = {}; rows.forEach((r: any) => Object.entries(r.m).forEach(([k, v]) => (tot[k] = (tot[k] ?? 0) + (v as number))));
+          const seen = [...new Set((stats ?? []).map((x: any) => x.metric as string))];
+          const cat = catalogFor(kind, seen);
+          const chosen = parseSelection(jar.get(cookieName(kind))?.value, cat);
+          const cols = cat.cols.filter((c) => chosen.includes(c.key));
+          const sortKey = cols.some((c) => c.key === sp.sort) ? sp.sort! : cols[0]?.key;
+          const rows = links.map((l: any) => ({ l, m: perLink.get(l.id) ?? {} }));
+          const sc = cols.find((c) => c.key === sortKey);
+          if (sc) rows.sort((a: any, b: any) => (valueOf(sc, b.m) ?? -1) - (valueOf(sc, a.m) ?? -1));
+          const tot: Totals = {}; rows.forEach((r: any) => Object.entries(r.m).forEach(([k, v]) => (tot[k] = (tot[k] ?? 0) + (v as number))));
           return (
-            <div className="card" key={kind} style={{ marginBottom: 14 }}>
-              <table>
-                <thead><tr><th style={{ textTransform: "none", fontSize: 14, color: "var(--ink)" }}>{kind}</th>{COLS.map(([, l]) => <th key={l}>{l}</th>)}</tr></thead>
-                <tbody>{rows.map(({ l, m }: any) => <tr key={l.id}><td>{l.external_id}</td>{COLS.map(([k, , c]) => <td key={k}>{n(m[k], c)}</td>)}</tr>)}
-                  <tr><td><b>Total · {kind}</b></td>{COLS.map(([k, , c]) => <td key={k}><b>{n(tot[k], c)}</b></td>)}</tr></tbody>
-              </table>
+            <div key={kind} style={{ marginBottom: 18 }}>
+              <div className="between" style={{ marginBottom: 8 }}><b>{kind} · {links.length} source{links.length === 1 ? "" : "s"}</b>
+                <ColumnPicker cookie={cookieName(kind)} cols={cat.cols} selected={chosen} defaults={cat.defaults} /></div>
+              <div className="card scroll"><table>
+                <thead><tr><th>Source</th>{cols.map((c) => <th key={c.key} className={`num${c.key === sortKey ? " sorted" : ""}`} title={c.hint}><Link href={`?days=${days}&sort=${c.key}`}>{c.label}{c.key === sortKey ? " ↓" : ""}</Link></th>)}</tr></thead>
+                <tbody>{rows.map(({ l, m }: any) => <tr key={l.id}><td>{l.external_id}</td>{cols.map((c) => <td className="num" key={c.key}>{formatValue(c, valueOf(c, m))}</td>)}</tr>)}
+                  <tr><td><b>Total</b></td>{cols.map((c) => <td className="num" key={c.key}><b>{formatValue(c, valueOf(c, tot))}</b></td>)}</tr></tbody>
+              </table></div>
+              {cols.some((c) => c.group === "Network-reported") && <p className="mut" style={{ fontSize: 13, margin: "6px 2px 0" }}>“—” means {kind} has no data for that source. Network-reported columns (impressions, cost) only exist for sources with an ad-network integration.</p>}
             </div>);
         })}
 

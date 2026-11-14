@@ -1,4 +1,5 @@
 import type { MetricRow, TrackerAdapter } from "../types";
+import { SINGULAR_METRICS } from "./singular-metrics.ts";
 
 /**
  * Singular (MMP) via the Reporting API: create an async report, poll its status, download the rows.
@@ -19,8 +20,8 @@ import type { MetricRow, TrackerAdapter } from "../types";
 const BASE = "https://api.singular.net/api";
 // One row per (source, agency, day): Singular models agencies and sources as many-to-many, and stats are per pair.
 export const DIMENSIONS = ["source", "agency_name"];
-// Stored exactly as Singular reports them. Verified live: these four work. `revenue` fails the WHOLE report on accounts without revenue tracking, and account-specific custom metrics (e.g. custom_impressions) behave likewise, so neither is requested by default.
-export const METRICS = ["adn_impressions", "custom_clicks", "custom_installs", "adn_cost"];
+// Stored exactly as Singular reports them. The list (and why others are excluded) lives in singular-metrics.ts.
+export const METRICS = SINGULAR_METRICS.map((m) => m.key);
 const POLL_MS = 3000, MAX_POLLS = 40;
 
 type Creds = { api_key?: string };

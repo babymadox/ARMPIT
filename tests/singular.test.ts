@@ -31,8 +31,9 @@ function fakeSingular(opts: { fail?: boolean } = {}) {
 test("fetchStats runs the async flow and maps rows per source/day/metric", async () => {
   const { f, calls } = fakeSingular();
   const rows = await makeSingular({ fetch: f, pollMs: 0 }).fetchStats({ api_key: "K" }, "2026-11-12", "2026-11-13");
-  assert.deepEqual(rows.filter((r) => r.externalId === "Facebook" && r.group === "Viking Media").map((r) => [r.metric, r.value]),
-    [["custom_clicks", 300], ["custom_installs", 12], ["adn_cost", 55.5]].sort((a, b) => ["adn_impressions", "custom_clicks", "custom_installs", "adn_cost", "revenue"].indexOf(a[0] as string) - ["custom_impressions", "custom_clicks", "custom_installs", "adn_cost", "revenue"].indexOf(b[0] as string)));
+  const byMetric = <T extends { metric: string }>(r: T[]) => [...r].sort((a, b) => a.metric.localeCompare(b.metric));
+  assert.deepEqual(byMetric(rows.filter((r) => r.externalId === "Facebook" && r.group === "Viking Media")).map((r) => [r.metric, r.value]),
+    [["adn_cost", 55.5], ["custom_clicks", 300], ["custom_installs", 12]]);
   assert.equal(rows.some((r) => r.metric === "revenue"), false, "null metrics are skipped");
   assert.equal(rows.some((r) => r.externalId === ""), false, "rows without a source are skipped");
   assert.equal(rows.find((r) => r.externalId === "Unity")?.day, "2026-11-13");

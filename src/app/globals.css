@@ -20,7 +20,7 @@ nav.side{position:sticky;top:0;height:100vh;display:flex;flex-direction:column;g
 .me{margin-top:auto;display:flex;align-items:center;gap:10px;padding:10px;border-radius:12px;background:rgba(255,255,255,.06)}
 .me .who{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:13px;color:#e4e6ff}
 button.ghost{background:transparent;border:1px solid rgba(255,255,255,.2);color:#cfd2f5;padding:4px 10px;font-size:12px}button.ghost:hover{background:rgba(255,255,255,.1)}
-main{padding:32px 36px 64px;max-width:1280px;width:100%}
+main{padding:32px 36px 64px;max-width:1280px;width:100%;min-width:0}
 .phead{display:flex;justify-content:space-between;align-items:flex-end;gap:16px;flex-wrap:wrap;margin-bottom:22px}.phead p{margin:4px 0 0}
 
 /* surfaces */
@@ -73,3 +73,12 @@ form.row,.toolbar{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin
   .navlist{flex-direction:row}.navlist a{padding:8px 10px;white-space:nowrap}.me{margin:0 0 0 auto}main{padding:20px 16px 48px}
   .split{grid-template-columns:1fr}.auth{grid-template-columns:1fr}.auth .hero{display:none}.search{margin-left:0}.search input{min-width:0;width:100%}
 }
+
+/* column picker */
+.picker{position:relative}.picker summary{list-style:none;cursor:pointer}.picker summary::-webkit-details-marker{display:none}
+.picker-pop{position:absolute;right:0;top:calc(100% + 8px);z-index:20;width:min(340px,88vw);max-height:70vh;overflow:auto;display:grid;gap:12px}
+.picker-pop fieldset{border:0;margin:0;padding:0;display:grid;gap:6px}.picker-pop legend{font-size:12px;text-transform:uppercase;letter-spacing:.04em;color:var(--mut);margin-bottom:4px;padding:0}
+.picker-pop label{display:flex;gap:8px;align-items:center;font-size:14px;cursor:pointer}.picker-pop input{padding:0;accent-color:var(--brand)}
+th a{color:inherit}th a:hover{color:var(--brand)}th.sorted{color:var(--brand)}.num{text-align:right;font-variant-numeric:tabular-nums}th.num{text-align:right}
+.scroll{overflow-x:auto}
+.btn{display:inline-block;padding:9px 14px;border:1px solid var(--line);border-radius:10px;background:var(--card);font-weight:500;user-select:none}.btn:hover{background:var(--bg)}details[open]>.btn{border-color:var(--brand);box-shadow:0 0 0 3px color-mix(in srgb,var(--brand) 22%,transparent)}
