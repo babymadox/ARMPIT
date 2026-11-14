@@ -18,8 +18,8 @@ import type { MetricRow, TrackerAdapter } from "../types";
  */
 const BASE = "https://api.singular.net/api";
 export const DIMENSIONS = ["source"];
-// Stored exactly as Singular reports them. All five names appear in the official client's metric list; account-specific custom metrics (e.g. custom_impressions) are deliberately excluded because an unknown metric fails the whole report.
-export const METRICS = ["adn_impressions", "custom_clicks", "custom_installs", "adn_cost", "revenue"];
+// Stored exactly as Singular reports them. Verified live: these four work. `revenue` fails the WHOLE report on accounts without revenue tracking, and account-specific custom metrics (e.g. custom_impressions) behave likewise, so neither is requested by default.
+export const METRICS = ["adn_impressions", "custom_clicks", "custom_installs", "adn_cost"];
 const POLL_MS = 3000, MAX_POLLS = 40;
 
 type Creds = { api_key?: string };

@@ -35,7 +35,7 @@ psql "postgresql://postgres:postgres@127.0.0.1:54322/postgres" -f supabase/seed.
 | Tasks (Overview) | Working |
 | Automations | Admin CRUD works; the cron evaluates only `no_message`. Metric-drop and cap triggers are TODO. |
 | Inbox | Reads, replies and realtime-ready schema. **Nothing is delivered to providers yet.** |
-| Singular tracker | Implemented (`trackers/singular.ts`) with a connect form in Settings, credentials in Vault, hourly sync. Request/response shapes verified against Singular's official Python client and covered by mocked tests (`npm test`); **not yet run against a live Singular account**. |
+| Singular tracker | Implemented (`trackers/singular.ts`) with a connect form in Settings, credentials in Vault, hourly sync. Request/response shapes verified against Singular's official Python client and covered by mocked tests (`npm test`) and **run live against a real Singular account** (key check plus a 7-day sync). Requests four metrics: `adn_impressions`, `custom_clicks`, `custom_installs`, `adn_cost`. `revenue` fails the whole report on accounts without revenue tracking, so it is not requested by default. |
 | Other trackers | **Stubs** (Cellxpert, Affise, Affilka, Voonix, AppsFlyer) |
 | Channel integrations | **Stubs** in `src/lib/integrations/channels/*` (Telegram, WhatsApp, Teams, Gmail) |
 | AI agent | `POST /api/agent` answers from RLS-scoped data; no UI panel yet |
@@ -56,7 +56,7 @@ psql "postgresql://postgres:postgres@127.0.0.1:54322/postgres" -f supabase/seed.
 
 ## Suggested order of work
 
-1. Run the Singular adapter once with a real key (confirm the five metrics are enabled on the account), then add a UI to link partners to Singular `source` values (rows go to `partner_links`).
+1. Add a UI to link partners to Singular `source` values (rows go to `partner_links`), and make the metric list configurable per account.
 2. Telegram or Gmail end to end: connect, webhook in, outbound send worker, realtime in the inbox.
 3. Invite emails, audit-log writes, notifications bell.
 4. Remaining automation triggers, deal/payment forms, Stripe billing.
