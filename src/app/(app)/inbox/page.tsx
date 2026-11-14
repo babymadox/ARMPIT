@@ -1,36 +1,79 @@
 import Link from "next/link";
 import { revalidatePath } from "next/cache";
 import { requireSession } from "@/lib/session";
+import { channels } from "@/lib/integrations";
+import { readCreds } from "@/lib/secrets";
+import { supabaseAdmin } from "@/lib/supabase/admin";
 import { ago } from "@/lib/format";
 import { Avatar, Icon, PageHeader } from "@/components/ui";
+import { LiveRefresh } from "@/components/LiveRefresh";
+
+export const maxDuration = 30;
 
 const CHANNELS = [
-  { k: "telegram", n: "Telegram", c: "#229ed9" }, { k: "whatsapp", n: "WhatsApp", c: "#25d366" }, { k: "teams", n: "Microsoft Teams", c: "#5b5fc7" },
+  { k: "telegram", n: "Telegram", c: "#229ed9", live: true }, { k: "whatsapp", n: "WhatsApp", c: "#25d366" }, { k: "teams", n: "Microsoft Teams", c: "#5b5fc7" },
   { k: "gmail", n: "Gmail", c: "#ea4335" }, { k: "linkedin", n: "LinkedIn", c: "#0a66c2" },
 ];
 
+/** Saves the reply, then delivers it through the channel. A failed delivery stays visible on the message. */
 async function reply(fd: FormData) {
   "use server";
   const { db, org } = await requireSession();
-  const conversation_id = String(fd.get("c"));
-  // Persisted only: delivery to the provider needs the channel adapter (not connected yet).
-  await db.from("messages").insert({ org_id: org.id, conversation_id, direction: "out", sender_name: "You", body: String(fd.get("body")) });
-  await db.from("conversations").update({ last_message_at: new Date().toISOString(), unread: false }).eq("id", conversation_id);
+  const cid = String(fd.get("c")), body = String(fd.get("body") ?? "").trim();
+  if (!body) return;
+  const { data: conv } = await db.from("conversations").select("id,channel,external_id,connection_id").eq("id", cid).maybeSingle();   // RLS: only chats I can see
+  if (!conv) throw new Error("Conversation not found");
+  const { data: msg, error } = await db.from("messages").insert({ org_id: org.id, conversation_id: cid, direction: "out", sender_name: "You", body, delivery_status: "pending" }).select("id").single();
+  if (error || !msg) throw new Error(error?.message ?? "Could not save the message");
+  const admin = supabaseAdmin();
+  try {
+    if (!conv.connection_id) throw new Error("This chat has no channel connection");
+    const { data: conn } = await admin.from("channel_connections").select("vault_secret_id,org_id").eq("id", conv.connection_id).eq("org_id", org.id).single();
+    if (!conn) throw new Error("Channel connection not found");
+    const adapter = (channels as Record<string, (typeof channels)[keyof typeof channels]>)[conv.channel];
+    const sent = await adapter.send(await readCreds(conn.vault_secret_id), conv.external_id, body);
+    await admin.from("messages").update({ delivery_status: "sent", external_id: sent.externalId }).eq("id", msg.id);
+  } catch (e) {
+    await admin.from("messages").update({ delivery_status: "failed", error: e instanceof Error ? e.message : String(e) }).eq("id", msg.id);
+  }
+  await db.from("conversations").update({ last_message_at: new Date().toISOString(), unread: false }).eq("id", cid);
+  revalidatePath("/inbox");
+}
+
+async function setPartner(fd: FormData) {
+  "use server";
+  const { db, isAdmin } = await requireSession();
+  if (!isAdmin) throw new Error("Admins only");
+  const pid = String(fd.get("partner") ?? "");
+  await db.from("conversations").update({ partner_id: pid || null }).eq("id", String(fd.get("c")));
+  revalidatePath("/inbox");
+}
+async function setOwner(fd: FormData) {
+  "use server";
+  const { db, isAdmin } = await requireSession();
+  if (!isAdmin) throw new Error("Admins only");
+  await db.from("conversations").update({ owner_id: String(fd.get("owner")) }).eq("id", String(fd.get("c")));
   revalidatePath("/inbox");
 }
 
 export default async function Inbox({ searchParams }: { searchParams: Promise<{ c?: string; ch?: string }> }) {
   const { c, ch } = await searchParams;
-  const { db } = await requireSession(); // RLS already limits this to my chats (or all, for admins)
-  let q = db.from("conversations").select("id,channel,title,unread,last_message_at,partner:partners(name)").order("last_message_at", { ascending: false }).limit(100);
+  const { db, isAdmin } = await requireSession(); // RLS already limits this to my chats (or all, for admins)
+  let q = db.from("conversations").select("id,channel,title,unread,last_message_at,partner_id,owner_id,partner:partners(name)").order("last_message_at", { ascending: false, nullsFirst: false }).limit(100);
   if (ch) q = q.eq("channel", ch);
   const [{ data: chats = [] }, { data: conns = [] }] = await Promise.all([q, db.from("channel_connections").select("kind,status")]);
   const connected = new Set((conns ?? []).filter((x: any) => x.status === "connected").map((x: any) => x.kind));
   const open = c ?? chats![0]?.id;
-  const { data: msgs = [] } = open ? await db.from("messages").select("id,direction,sender_name,body,sent_at").eq("conversation_id", open).order("sent_at") : { data: [] };
+  const current: any = chats!.find((x: any) => x.id === open);
+  const { data: msgs = [] } = open ? await db.from("messages").select("id,direction,sender_name,body,sent_at,delivery_status,error").eq("conversation_id", open).order("sent_at") : { data: [] };
+  if (current?.unread) await db.from("conversations").update({ unread: false }).eq("id", open);
+  const [{ data: partners = [] }, { data: members = [] }] = isAdmin && current
+    ? await Promise.all([db.from("partners").select("id,name").order("name"), db.from("members").select("id,full_name,email").eq("status", "active")])
+    : [{ data: [] }, { data: [] }];
 
   return (
     <>
+      <LiveRefresh />
       <PageHeader title="Inbox" sub="Every partner conversation, from every channel" />
       <div className="channels" style={{ marginBottom: 22 }}>
         {CHANNELS.map((x) => (
@@ -38,24 +81,42 @@ export default async function Inbox({ searchParams }: { searchParams: Promise<{ 
             <div className="top"><span className="ch-ic" style={{ background: x.c }}>{x.n[0]}</span><div><b>{x.n}</b><div className="mut" style={{ fontSize: 13 }}>{connected.has(x.k as any) ? "Connected" : "Not connected"}</div></div></div>
             {connected.has(x.k as any)
               ? <Link href={`/inbox?ch=${x.k}`}><button style={{ width: "100%" }}>Open {x.n}</button></Link>
-              : <><span className="pill warn" style={{ alignSelf: "flex-start" }}>API setup required</span><button disabled title="This channel's API connection has not been set up yet" style={{ opacity: 0.55, cursor: "not-allowed" }}>Connect</button></>}
+              : x.live
+                ? <Link href="/settings#channels"><button className="pri" style={{ width: "100%" }}>Connect</button></Link>
+                : <><span className="pill warn" style={{ alignSelf: "flex-start" }}>API setup required</span><button disabled title="This channel's API connection has not been set up yet" style={{ opacity: 0.55, cursor: "not-allowed" }}>Connect</button></>}
           </div>))}
       </div>
       {!chats!.length ? (
         <div className="empty"><span className="stat-ic brand"><Icon name="chat" size={22} /></span><b>No conversations yet</b>
-          <p>Messages appear here once a channel above is connected. Each channel needs its API set up before it can fetch messages.</p></div>
+          <p>{connected.size ? "New messages appear here as they arrive. Add the bot to a partner group and send a message." : "Connect a channel above. Messages appear here once it is connected."}</p></div>
       ) : (
         <div className="split">
           <div className="card">
             <div className="toolbar" style={{ marginBottom: 8 }}>{CHANNELS.map((k) => <Link key={k.k} className={`pill${ch === k.k ? " ok" : ""}`} href={`/inbox?ch=${k.k}`}>{k.n}</Link>)}{ch && <Link className="pill" href="/inbox">All</Link>}</div>
             {chats!.map((x: any) => (
-              <Link key={x.id} href={`/inbox?c=${x.id}`} className={`convo${x.unread ? " unread" : ""}`}>
+              <Link key={x.id} href={`/inbox?c=${x.id}${ch ? `&ch=${ch}` : ""}`} className={`convo${x.unread && x.id !== open ? " unread" : ""}`}>
                 <Avatar name={x.partner?.name ?? x.title ?? "?"} /><div><b>{x.partner?.name ?? x.title}</b><div className="mut" style={{ fontSize: 12 }}>{x.channel} · {ago(x.last_message_at)}</div></div>
               </Link>))}
           </div>
           <div className="card thread">
-            {msgs!.map((m: any) => <div key={m.id} className={`msg ${m.direction}`}>{m.body}</div>)}
-            {open && <form className="row" action={reply} style={{ marginTop: "auto" }}><input type="hidden" name="c" value={open} /><input name="body" style={{ flex: 1 }} placeholder="Write a reply" required /><button className="pri">Send</button></form>}
+            {current && (
+              <div className="between" style={{ marginBottom: 8, flexWrap: "wrap" }}>
+                <div><b>{current.title ?? current.partner?.name}</b><div className="mut" style={{ fontSize: 13 }}>{current.channel}{current.partner ? ` · partner: ${current.partner.name}` : ""}</div></div>
+                {isAdmin && (
+                  <div className="row" style={{ margin: 0 }}>
+                    <form action={setPartner} className="row" style={{ margin: 0 }}><input type="hidden" name="c" value={current.id} />
+                      <select name="partner" defaultValue={current.partner_id ?? ""} aria-label="Partner"><option value="">No partner</option>{partners!.map((p: any) => <option key={p.id} value={p.id}>{p.name}</option>)}</select><button>Link</button></form>
+                    <form action={setOwner} className="row" style={{ margin: 0 }}><input type="hidden" name="c" value={current.id} />
+                      <select name="owner" defaultValue={current.owner_id ?? ""} aria-label="Assigned to">{members!.map((m: any) => <option key={m.id} value={m.id}>{m.full_name ?? m.email}</option>)}</select><button>Assign</button></form>
+                  </div>)}
+              </div>)}
+            {msgs!.map((m: any) => (
+              <div key={m.id} className={`msg ${m.direction}`}>
+                {m.direction === "in" && m.sender_name && <div style={{ fontSize: 12, fontWeight: 600, opacity: 0.7 }}>{m.sender_name}</div>}
+                <div style={{ whiteSpace: "pre-wrap" }}>{m.body}</div>
+                {m.direction === "out" && m.delivery_status !== "sent" && <div style={{ fontSize: 12, marginTop: 4 }}>{m.delivery_status === "pending" ? "Sending…" : `⚠ Not delivered: ${m.error ?? "unknown error"}`}</div>}
+              </div>))}
+            {open && <form className="row" action={reply} style={{ marginTop: "auto" }}><input type="hidden" name="c" value={open} /><input name="body" style={{ flex: 1 }} placeholder="Write a reply" maxLength={4000} required /><button className="pri">Send</button></form>}
           </div>
         </div>
       )}

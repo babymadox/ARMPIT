@@ -13,13 +13,18 @@ export interface TrackerAdapter {
   fetchStats(creds: Record<string, string>, from: string, to: string): Promise<MetricRow[]>;
 }
 
-export type InboundMessage = { externalConversationId: string; externalId: string; title?: string; sender: string; body: string; sentAt: string; attachments?: { name: string; url: string }[] };
+export type InboundMessage = { externalConversationId: string; externalId: string; title?: string; sender: string; body: string; sentAt: string; attachments?: { name: string; kind: string }[] };
+export type Creds = Record<string, string>;
 
 export interface ChannelAdapter {
   kind: "telegram" | "whatsapp" | "teams" | "gmail" | "linkedin";
-  /** Start the provider's connect/OAuth flow and return the URL (or QR payload) to show the user. */
-  beginConnect(memberId: string): Promise<{ url?: string; qr?: string }>;
-  /** Parse and verify a webhook delivery. Throws on a bad signature. */
-  parseWebhook(req: Request): Promise<InboundMessage[]>;
-  send(creds: Record<string, string>, externalConversationId: string, body: string): Promise<{ externalId: string }>;
+  /** Validate the credentials and register the provider's webhook. Returns the account label and the credentials to store (may add a webhook secret). */
+  connect(creds: Creds, webhookUrl: string): Promise<{ account: string; creds: Creds }>;
+  /** Remove the provider-side webhook. Best effort. */
+  disconnect(creds: Creds): Promise<void>;
+  /** Live health of the connection, for the Settings screen. */
+  status(creds: Creds, webhookUrl: string): Promise<{ ok: boolean; detail: string }>;
+  /** Verify and parse one webhook delivery. Throws on a bad signature. Returns [] for updates we ignore. */
+  parseWebhook(req: Request, creds: Creds): Promise<InboundMessage[]>;
+  send(creds: Creds, externalConversationId: string, body: string): Promise<{ externalId: string }>;
 }

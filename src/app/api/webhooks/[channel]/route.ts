@@ -1,25 +1,31 @@
 import { NextResponse } from "next/server";
 import { channels } from "@/lib/integrations";
+import { ingestMessages } from "@/lib/inbox";
+import { readCreds } from "@/lib/secrets";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 
-// Inbound messages from Telegram / WhatsApp / Teams / Gmail land here.
-// The adapter verifies the provider's signature; we then upsert the conversation and message.
+export const maxDuration = 30;
+
+/**
+ * Inbound messages from a channel provider. The URL carries the connection id (?c=...), so a delivery is always
+ * attributed to exactly one workspace; the adapter then verifies the provider's per-connection secret.
+ * Always answers 200 for deliveries we deliberately ignore, so the provider does not retry them forever.
+ */
 export async function POST(req: Request, { params }: { params: Promise<{ channel: string }> }) {
   const { channel } = await params;
   const adapter = (channels as Record<string, (typeof channels)[keyof typeof channels]>)[channel];
-  if (!adapter) return NextResponse.json({ error: "unknown channel" }, { status: 404 });
-  let msgs;
-  try { msgs = await adapter.parseWebhook(req); } catch (e) { return NextResponse.json({ error: String(e) }, { status: 401 }); }
+  const connId = new URL(req.url).searchParams.get("c");
+  if (!adapter || !connId) return NextResponse.json({ error: "not found" }, { status: 404 });
 
   const db = supabaseAdmin();
-  for (const m of msgs) {
-    // TODO: resolve org_id + owner from the channel_connection that received the message.
-    const { data: conn } = await db.from("channel_connections").select("id,org_id,member_id").eq("kind", channel).limit(1).maybeSingle();
-    if (!conn) continue;
-    const { data: conv } = await db.from("conversations").upsert(
-      { org_id: conn.org_id, channel, connection_id: conn.id, external_id: m.externalConversationId, title: m.title, owner_id: conn.member_id, unread: true, last_message_at: m.sentAt },
-      { onConflict: "org_id,channel,external_id" }).select("id").single();
-    if (conv) await db.from("messages").upsert({ org_id: conn.org_id, conversation_id: conv.id, direction: "in", sender_name: m.sender, body: m.body, attachments: m.attachments ?? [], external_id: m.externalId, sent_at: m.sentAt }, { onConflict: "conversation_id,external_id" });
-  }
+  const { data: conn } = await db.from("channel_connections").select("id,org_id,member_id,kind,vault_secret_id").eq("id", connId).eq("kind", channel).maybeSingle();
+  if (!conn) return NextResponse.json({ error: "not found" }, { status: 404 });
+
+  let msgs;
+  try { msgs = await adapter.parseWebhook(req, await readCreds(conn.vault_secret_id)); }
+  catch { return NextResponse.json({ error: "unauthorized" }, { status: 401 }); }   // bad secret: say nothing more
+
+  try { await ingestMessages(db, conn, msgs); }
+  catch (e) { console.error("ingest failed", channel, e); return NextResponse.json({ error: "temporary failure" }, { status: 500 }); } // 5xx makes the provider retry
   return NextResponse.json({ ok: true });
 }
