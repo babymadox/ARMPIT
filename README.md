@@ -4,6 +4,10 @@ Production skeleton of the ARMPIT demo: a workspace for affiliate managers (unif
 
 **Stack:** Next.js 15 (App Router, server components + server actions) · Supabase (Postgres, Auth, Realtime, Vault) · TypeScript.
 
+## Hosted Supabase
+
+Project `armpit` (ref `nhnwzxttpncechcgqqvl`, ap-south-1) has migrations 1 to 4 applied. `.env.example` points at it; add the service-role key yourself.
+
 ## Run it locally
 
 ```bash
@@ -31,7 +35,8 @@ psql "postgresql://postgres:postgres@127.0.0.1:54322/postgres" -f supabase/seed.
 | Tasks (Overview) | Working |
 | Automations | Admin CRUD works; the cron evaluates only `no_message`. Metric-drop and cap triggers are TODO. |
 | Inbox | Reads, replies and realtime-ready schema. **Nothing is delivered to providers yet.** |
-| Tracker integrations | **Stubs** in `src/lib/integrations/trackers/*` (Cellxpert, Affise, Affilka, Voonix, AppsFlyer) |
+| Singular tracker | Implemented (`trackers/singular.ts`) with a connect form in Settings, credentials in Vault, hourly sync. **API details unverified**: see the `VERIFY` markers in that file and test with a real key. |
+| Other trackers | **Stubs** (Cellxpert, Affise, Affilka, Voonix, AppsFlyer) |
 | Channel integrations | **Stubs** in `src/lib/integrations/channels/*` (Telegram, WhatsApp, Teams, Gmail) |
 | AI agent | `POST /api/agent` answers from RLS-scoped data; no UI panel yet |
 | Billing (Stripe), notifications UI, audit-log writes, onboarding wizard | TODO |
@@ -51,7 +56,7 @@ psql "postgresql://postgres:postgres@127.0.0.1:54322/postgres" -f supabase/seed.
 
 ## Suggested order of work
 
-1. Tracker adapter #1 (the one your first customers use) + connect flow in Settings → Integrations.
+1. Verify the Singular adapter against a real account, then add a UI to link partners to Singular `source` values (rows go to `partner_links`).
 2. Telegram or Gmail end to end: connect, webhook in, outbound send worker, realtime in the inbox.
 3. Invite emails, audit-log writes, notifications bell.
 4. Remaining automation triggers, deal/payment forms, Stripe billing.

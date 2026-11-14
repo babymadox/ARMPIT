@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { trackers } from "@/lib/integrations";
 import { supabaseAdmin } from "@/lib/supabase/admin";
+import { readCreds } from "@/lib/secrets";
 
 // Scheduled (Vercel Cron / Supabase pg_cron -> HTTP). Pulls the last 2 days of stats per connection.
 export async function GET(req: Request) {
@@ -11,9 +12,9 @@ export async function GET(req: Request) {
   let rows = 0;
   for (const c of conns!) {
     const adapter = trackers[c.kind as keyof typeof trackers];
-    // TODO: read credentials from Supabase Vault via c.vault_secret_id (decrypted_secrets view, service role only).
-    const creds: Record<string, string> = {};
-    const stats = await adapter.fetchStats(creds, from, to);
+    let stats;
+    try { stats = await adapter.fetchStats(await readCreds(c.vault_secret_id), from, to); }
+    catch (e) { await db.from("tracker_connections").update({ status: "error" }).eq("id", c.id); console.error("sync failed", c.kind, e); continue; }
     const { data: links = [] } = await db.from("partner_links").select("id,external_id").eq("connection_id", c.id);
     const byExt = new Map(links!.map((l) => [l.external_id, l.id]));
     const out = stats.filter((s) => byExt.has(s.externalId)).map((s) => ({ link_id: byExt.get(s.externalId)!, org_id: c.org_id, day: s.day, metric: s.metric, value: s.value }));

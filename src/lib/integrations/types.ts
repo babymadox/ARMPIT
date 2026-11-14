@@ -3,7 +3,7 @@
 export type MetricRow = { externalId: string; day: string; metric: string; value: number };
 
 export interface TrackerAdapter {
-  kind: "cellxpert" | "affise" | "affilka" | "voonix" | "appsflyer";
+  kind: "cellxpert" | "affise" | "affilka" | "voonix" | "appsflyer" | "singular";
   /** Verify credentials before saving them. */
   test(creds: Record<string, string>): Promise<{ ok: boolean; error?: string }>;
   /** Affiliates visible in the tracker, to link to partners. */

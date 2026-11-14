@@ -4,7 +4,7 @@ create extension if not exists pgcrypto;
 create type member_role   as enum ('owner_admin','admin','member');
 create type member_status as enum ('active','invited','suspended');
 create type partner_type  as enum ('publisher','advertiser');
-create type tracker_kind  as enum ('cellxpert','affise','affilka','voonix','appsflyer');
+create type tracker_kind  as enum ('cellxpert','affise','affilka','voonix','appsflyer','singular');
 create type channel_kind  as enum ('telegram','whatsapp','teams','gmail');
 create type deal_kind     as enum ('cpa','cpl','revshare','hybrid');
 create type deal_status   as enum ('draft','pending_approval','approved','live','ended');
