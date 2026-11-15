@@ -76,11 +76,14 @@ export default async function Inbox({ searchParams }: { searchParams: Promise<{ 
   const { db, isAdmin } = await requireSession(); // RLS already limits this to my chats (or all, for admins)
   let q = db.from("conversations").select("id,channel,title,unread,last_message_at,partner_id,owner_id,partner:partners(name)").order("last_message_at", { ascending: false, nullsFirst: false }).limit(100);
   if (ch) q = q.eq("channel", ch);
-  const [{ data: chats = [] }, { data: conns = [] }] = await Promise.all([q, db.from("channel_connections").select("kind,status")]);
-  const connected = new Set((conns ?? []).filter((x: any) => x.status === "connected").map((x: any) => x.kind));
-  const open = c ?? chats![0]?.id;
-  const current: any = chats!.find((x: any) => x.id === open);
-  const { data: msgs = [] } = open ? await db.from("messages").select("id,direction,sender_name,body,sent_at,delivery_status,error").eq("conversation_id", open).order("sent_at") : { data: [] };
+  const [chatsRes, connsRes] = await Promise.all([q, db.from("channel_connections").select("kind,status")]);
+  const chats = chatsRes.data ?? [], conns = connsRes.data ?? [];   // a failed query gives data: null, which a "= []" default would NOT replace
+  const connected = new Set(conns.filter((x: any) => x.status === "connected").map((x: any) => x.kind));
+  const open = c ?? chats[0]?.id;
+  const current: any = chats.find((x: any) => x.id === open);
+  const msgsRes = open ? await db.from("messages").select("id,direction,sender_name,body,sent_at,delivery_status,error").eq("conversation_id", open).order("sent_at") : { data: [], error: null };
+  const msgs = msgsRes.data ?? [];
+  const loadError = chatsRes.error ?? connsRes.error ?? msgsRes.error;
   if (current?.unread) await db.from("conversations").update({ unread: false }).eq("id", open); // best effort: read marker
   const [{ data: partners = [] }, { data: members = [] }] = isAdmin && current
     ? await Promise.all([db.from("partners").select("id,name").order("name"), db.from("members").select("id,full_name,email").eq("status", "active")])
@@ -90,6 +93,7 @@ export default async function Inbox({ searchParams }: { searchParams: Promise<{ 
     <>
       <LiveRefresh />
       <PageHeader title="Inbox" sub="Every partner conversation, from every channel" />
+      {loadError && <div className="notice" role="alert" style={{ borderColor: "var(--bad)" }}><b>Part of the inbox could not load.</b> {loadError.message}. This usually means a database update is pending: run <code>supabase/catch-up.sql</code> (or migration 7) in the Supabase SQL editor.</div>}
       <div className="channels" style={{ marginBottom: 22 }}>
         {CHANNELS.map((x) => (
           <div className="card channel" key={x.k}>
@@ -101,14 +105,14 @@ export default async function Inbox({ searchParams }: { searchParams: Promise<{ 
                 : <><span className="pill warn" style={{ alignSelf: "flex-start" }}>API setup required</span><button disabled title="This channel's API connection has not been set up yet" style={{ opacity: 0.55, cursor: "not-allowed" }}>Connect</button></>}
           </div>))}
       </div>
-      {!chats!.length ? (
+      {!chats.length ? (
         <div className="empty"><span className="stat-ic brand"><Icon name="chat" size={22} /></span><b>No conversations yet</b>
           <p>{connected.size ? "New messages appear here as they arrive. Add the bot to a partner group and send a message." : "Connect a channel above. Messages appear here once it is connected."}</p></div>
       ) : (
         <div className="split">
           <div className="card">
             <div className="toolbar" style={{ marginBottom: 8 }}>{CHANNELS.map((k) => <Link key={k.k} className={`pill${ch === k.k ? " ok" : ""}`} href={`/inbox?ch=${k.k}`}>{k.n}</Link>)}{ch && <Link className="pill" href="/inbox">All</Link>}</div>
-            {chats!.map((x: any) => (
+            {chats.map((x: any) => (
               <Link key={x.id} href={`/inbox?c=${x.id}${ch ? `&ch=${ch}` : ""}`} className={`convo${x.unread && x.id !== open ? " unread" : ""}`}>
                 <Avatar name={x.partner?.name ?? x.title ?? "?"} /><div><b>{x.partner?.name ?? x.title}</b><div className="mut" style={{ fontSize: 12 }}>{x.channel} · {ago(x.last_message_at)}</div></div>
               </Link>))}
@@ -120,12 +124,12 @@ export default async function Inbox({ searchParams }: { searchParams: Promise<{ 
                 {isAdmin && (
                   <div className="row" style={{ margin: 0 }}>
                     <form action={setPartner} className="row" style={{ margin: 0 }}><input type="hidden" name="c" value={current.id} />
-                      <select name="partner" defaultValue={current.partner_id ?? ""} aria-label="Partner"><option value="">No partner</option>{partners!.map((p: any) => <option key={p.id} value={p.id}>{p.name}</option>)}</select><button>Link</button></form>
+                      <select name="partner" defaultValue={current.partner_id ?? ""} aria-label="Partner"><option value="">No partner</option>{(partners ?? []).map((p: any) => <option key={p.id} value={p.id}>{p.name}</option>)}</select><button>Link</button></form>
                     <form action={setOwner} className="row" style={{ margin: 0 }}><input type="hidden" name="c" value={current.id} />
-                      <select name="owner" defaultValue={current.owner_id ?? ""} aria-label="Assigned to">{members!.map((m: any) => <option key={m.id} value={m.id}>{m.full_name ?? m.email}</option>)}</select><button>Assign</button></form>
+                      <select name="owner" defaultValue={current.owner_id ?? ""} aria-label="Assigned to">{(members ?? []).map((m: any) => <option key={m.id} value={m.id}>{m.full_name ?? m.email}</option>)}</select><button>Assign</button></form>
                   </div>)}
               </div>)}
-            {msgs!.map((m: any) => (
+            {msgs.map((m: any) => (
               <div key={m.id} className={`msg ${m.direction}`}>
                 {m.direction === "in" && m.sender_name && <div style={{ fontSize: 12, fontWeight: 600, opacity: 0.7 }}>{m.sender_name}</div>}
                 <div style={{ whiteSpace: "pre-wrap" }}>{m.body}</div>
