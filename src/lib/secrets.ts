@@ -10,7 +10,7 @@ export async function storeCreds(name: string, creds: Record<string, string>) {
 export async function readCreds(secretId: string | null, orgId: string): Promise<Record<string, string>> {
   if (!secretId) return {};
   const { data, error } = await supabaseAdmin().rpc("read_secret_for_org", { secret_id: secretId, org: orgId });
-  if (error) throw new Error(error.message);
+  if (error) throw new Error(error.code === "PGRST202" ? "Database update needed: run migration 8 (supabase/migrations/20261114000008_workspace_guards.sql) in the Supabase SQL editor" : error.message);
   if (data == null) throw new Error("Credentials not found for this workspace");
   return JSON.parse(data as string);
 }
