@@ -46,6 +46,7 @@ export async function buildReport(orgId: string, { origin, includeSystem }: Opts
     probe("schema.email.conn", "Mailbox columns (migration 11)", MIGRATION(11, "20261114000011_email_channel.sql"), () => db.from("channel_connections").select("sync_state,last_polled_at,last_error").limit(0)),
     probe("schema.email.subject", "Message subject column (migration 11)", MIGRATION(11, "20261114000011_email_channel.sql"), () => db.from("messages").select("subject").limit(0)),
   ]);
+  await probe("schema.activation", "activation_codes table (migration 12)", MIGRATION(12, "20261114000012_activation_codes.sql"), () => db.from("activation_codes").select("id").limit(0));
   try {
     const { error } = await db.rpc("read_secret_for_org", { secret_id: crypto.randomUUID(), org: orgId });
     const missing = !!error && (error as { code?: string }).code === "PGRST202";
@@ -101,6 +102,7 @@ export async function buildReport(orgId: string, { origin, includeSystem }: Opts
     latest("notifications.created", "A notification was created", () => db.from("notifications").select("created_at").eq("org_id", orgId).order("created_at", { ascending: false }).limit(1), (r) => r?.created_at),
     latest("agent.answered", "The AI agent answered a question", () => db.from("app_events").select("created_at").eq("org_id", orgId).eq("source", "agent").eq("message", "answered").order("created_at", { ascending: false }).limit(1), (r) => r?.created_at),
     latest("email.received", "Email received from a partner", () => db.from("messages").select("sent_at, conversation:conversations!inner(channel)").eq("org_id", orgId).eq("direction", "in").eq("conversation.channel", "email").order("sent_at", { ascending: false }).limit(1), (r) => r?.sent_at),
+    latest("activation.issued", "An activation code was issued", () => db.from("app_events").select("created_at").eq("source", "admin.activation").order("created_at", { ascending: false }).limit(1), (r) => r?.created_at),
     latest("events.recent", "Event log is recording", () => db.from("app_events").select("created_at").or(`org_id.eq.${orgId},org_id.is.null`).order("created_at", { ascending: false }).limit(1), (r) => r?.created_at),
   ]);
 

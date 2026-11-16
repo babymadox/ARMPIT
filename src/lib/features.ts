@@ -28,6 +28,7 @@ export const FEATURES: Feature[] = [
   { id: "chan.linkedin", area: "Inbox", name: "LinkedIn", status: "not-built", note: "LinkedIn messaging is restricted to approved partners" },
   { id: "trk.others", area: "Trackers", name: "Cellxpert, Affise, Affilka, Voonix, AppsFlyer", status: "not-built", note: "Each needs API access and documentation for that account" },
   { id: "agent", area: "AI", name: "Ask ARMPIT (AI agent)", status: "done", needs: ["env.anthropic"], evidence: "agent.answered" },
+  { id: "activation", area: "Core", name: "Activation codes: workspace creation needs a code only the operator can issue", status: "done", needs: ["schema.activation"], evidence: "activation.issued" },
   { id: "billing", area: "Core", name: "Billing (Stripe)", status: "not-built", note: "Needs a Stripe account, product and price" },
   { id: "audit", area: "Core", name: "Audit log (admins)", status: "done", needs: ["schema.workflow"], evidence: "audit.written" },
   { id: "notifications", area: "Core", name: "Notifications (bell, page, automatic alerts)", status: "done", needs: ["schema.workflow"], evidence: "notifications.created" },

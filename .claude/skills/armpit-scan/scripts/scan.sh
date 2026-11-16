@@ -122,6 +122,20 @@ legal = [lic.exists() and "All rights reserved" in lic.read_text() and "NO PERMI
          pathlib.Path("THIRD_PARTY_NOTICES.md").exists(), pj.get("license") == "UNLICENSED"]
 print(f"{G}  copyright notices in place (LICENSE, README, THIRD_PARTY_NOTICES, package.json UNLICENSED)" if all(legal) else f"{R}  legal notices missing or weakened: LICENSE={legal[0]} README={legal[1]} THIRD_PARTY_NOTICES={legal[2]} package.json={legal[3]}"); fails += not all(legal)
 
+# 12c. workspace creation must stay gated by an activation code, and the issuing endpoint must stay operator-only
+gate_ok = True; why = []
+sql = "\n".join(p.read_text() for p in sorted(pathlib.Path("supabase/migrations").glob("*.sql")))
+last = [m for m in re.finditer(r"create or replace function public\.create_organization\(([^)]*)\)(.*?)\$\$;", sql, re.S)]
+if not last or "activation_code" not in last[-1].group(1) or "redeem_activation_code" not in last[-1].group(2): gate_ok = False; why.append("create_organization no longer redeems an activation code")
+if "alter table activation_codes enable row level security" not in sql: gate_ok = False; why.append("activation_codes lost row level security")
+if re.search(r"create policy[^;]*on activation_codes", sql): gate_ok = False; why.append("a policy was added to activation_codes (it must stay deny-all)")
+route = pathlib.Path("src/app/api/admin/activation-codes/route.ts"); rt = route.read_text() if route.exists() else ""
+handlers = re.findall(r"export async function (GET|POST|PATCH|PUT|DELETE)\(", rt)
+if not handlers or rt.count("if (!authorised(req))") < len(handlers): gate_ok = False; why.append("an admin activation-code handler does not check authorisation")
+ob = pathlib.Path("src/app/onboarding/page.tsx"); ob_t = ob.read_text() if ob.exists() else ""
+if "activation_code" not in ob_t: gate_ok = False; why.append("the onboarding page no longer sends an activation code")
+print(f"{G}  workspace creation requires an activation code (database function, deny-all table, operator-only endpoint)" if gate_ok else f"{R}  activation gate weakened: " + "; ".join(why)); fails += not gate_ok
+
 # 13. Supabase silently caps every plain select at 1000 rows. A .limit() above that is a bug (it returns 1000 and no error);
 #     reads that need everything must page with fetchAll() or aggregate in SQL (rpc).
 caps = []
