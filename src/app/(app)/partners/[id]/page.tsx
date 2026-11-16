@@ -25,8 +25,9 @@ export default async function PartnerPage({ params, searchParams }: { params: Pr
   const { data: p } = await db.from("partners").select("*, owner:members!owner_id(full_name), links:partner_links(id,external_id,external_group,connection:tracker_connections(id,kind))").eq("id", id).maybeSingle();
   if (!p) notFound();
   const since = new Date(Date.now() - days * 864e5).toISOString().slice(0, 10);
-  const linkIds = p.links.map((l: any) => l.id);
-  const { data: stats = [] } = linkIds.length ? await db.from("tracker_stats").select("link_id,metric,value").in("link_id", linkIds).gte("day", since).limit(50000) : { data: [] };
+  // Totals are summed in SQL: a plain select is silently capped at 1000 rows and a partner with many sources has thousands.
+  const { data: totals, error: totalsErr } = p.links.length ? await db.rpc("link_metric_totals", { p_partner: id, p_since: since }) : { data: [], error: null };
+  const stats: { link_id: string; metric: string; value: number }[] = ((totals ?? []) as { link_id: string; metric: string; total: number }[]).map((t) => ({ link_id: t.link_id, metric: t.metric, value: Number(t.total) }));
   const [{ data: deals = [] }, { data: notes = [] }, { data: chats = [] }] = await Promise.all([
     db.from("deals").select("id,brand,kind,amount,rev_share_pct,status,currency").eq("partner_id", id),
     db.from("partner_notes").select("id,kind,body,created_at,author:members(full_name)").eq("partner_id", id).order("created_at", { ascending: false }),
@@ -35,7 +36,7 @@ export default async function PartnerPage({ params, searchParams }: { params: Pr
 
   // Per source: totals over the window. Totals row sums sources of the SAME tracker only, never across trackers.
   const perLink = new Map<string, Totals>();
-  (stats ?? []).forEach((s: any) => { const o = perLink.get(s.link_id) ?? {}; o[s.metric] = (o[s.metric] ?? 0) + Number(s.value); perLink.set(s.link_id, o); });
+  stats.forEach((s) => { const o = perLink.get(s.link_id) ?? {}; o[s.metric] = (o[s.metric] ?? 0) + Number(s.value); perLink.set(s.link_id, o); });
   const byTracker = new Map<string, any[]>();
   p.links.forEach((l: any) => (byTracker.get(l.connection.kind) ?? byTracker.set(l.connection.kind, []).get(l.connection.kind)!).push(l));
 
@@ -47,10 +48,11 @@ export default async function PartnerPage({ params, searchParams }: { params: Pr
         <div className="tabs">{[7, 30].map((d) => <Link key={d} className={`tab${days === d ? " on" : ""}`} href={`?days=${d}`}>{d} days</Link>)}</div>
       </header>
 
+      {totalsErr && <div className="notice" role="alert" style={{ borderColor: "var(--bad)" }}><b>Stats could not load.</b> {totalsErr.message}. This usually means migration 10 has not been applied (supabase/migrations/20261114000010_workflow_features.sql).</div>}
       <h2>Sources <span className="mut" style={{ fontWeight: 400, fontSize: 14 }}>{p.links.length} linked</span></h2>
       {!p.links.length ? <Empty icon="partners" title="No sources linked">Open Settings → Integrations → your tracker, then import the structure or map this partner to an agency.</Empty> :
         [...byTracker].map(([kind, links]) => {
-          const seen = [...new Set((stats ?? []).map((x: any) => x.metric as string))];
+          const seen = [...new Set(stats.map((x) => x.metric))];
           const cat = catalogFor(kind, seen);
           const chosen = parseSelection(jar.get(cookieName(kind))?.value, cat);
           const cols = cat.cols.filter((c) => chosen.includes(c.key));

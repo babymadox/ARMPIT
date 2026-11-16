@@ -3,6 +3,7 @@ import { readCreds } from "./secrets";
 import { supabaseAdmin } from "./supabase/admin";
 import { planImport, type Pair } from "./structure";
 import { errMsg, logEvent } from "./log";
+import { fetchAll } from "./db";
 
 const iso = (ms: number) => new Date(ms).toISOString().slice(0, 10);
 const chunks = <T,>(a: T[], n = 1000) => Array.from({ length: Math.ceil(a.length / n) }, (_, i) => a.slice(i * n, i * n + n));
@@ -45,11 +46,11 @@ async function syncCore(scope: Scope, connectionId: string, days: number, opts: 
 
   let createdPartners = 0, createdLinks = 0;
   if (opts.autoLink) {
-    const [{ data: partners = [] }, { data: existingLinks = [] }] = await Promise.all([
-      db.from("partners").select("id,name").eq("org_id", c.org_id),
-      db.from("partner_links").select("external_id,external_group").eq("connection_id", c.id),
+    const [partners, existingLinks] = await Promise.all([   // all rows: Supabase silently caps a plain select at 1000
+      fetchAll<{ id: string; name: string }>((f, t) => db.from("partners").select("id,name").eq("org_id", c.org_id).order("id").range(f, t)),
+      fetchAll<{ external_id: string; external_group: string }>((f, t) => db.from("partner_links").select("external_id,external_group").eq("connection_id", c.id).order("id").range(f, t)),
     ]);
-    const plan = planImport(pairs, partners!, existingLinks!);
+    const plan = planImport(pairs, partners, existingLinks);
     const ids = new Map<string, string>();
     for (const part of chunks(plan.toCreate, 500)) {
       const { data, error: e } = await db.from("partners").insert(part.map((name) => ({ org_id: c.org_id, name, type: "publisher", owner_id: opts.ownerId ?? null }))).select("id,name");
@@ -65,8 +66,8 @@ async function syncCore(scope: Scope, connectionId: string, days: number, opts: 
     createdLinks = rows.length;
   }
 
-  const { data: links = [] } = await db.from("partner_links").select("id,external_id,external_group").eq("connection_id", c.id);
-  const byPair = new Map(links!.map((l) => [`${l.external_id}|${l.external_group}`, l.id]));
+  const links = await fetchAll<{ id: string; external_id: string; external_group: string }>((f, t) => db.from("partner_links").select("id,external_id,external_group").eq("connection_id", c.id).order("id").range(f, t));
+  const byPair = new Map(links.map((l) => [`${l.external_id}|${l.external_group}`, l.id]));
   const rows = stats.filter((s) => byPair.has(`${s.externalId}|${s.group ?? ""}`)).map((s) => ({ link_id: byPair.get(`${s.externalId}|${s.group ?? ""}`)!, org_id: c.org_id, day: s.day, metric: s.metric, value: s.value }));
   for (const part of chunks(rows)) { const { error: e } = await db.from("tracker_stats").upsert(part); if (e) throw new Error(e.message); }
   const { error: e5 } = await db.from("tracker_connections").update({ last_synced_at: now, status: "connected" }).eq("id", c.id);

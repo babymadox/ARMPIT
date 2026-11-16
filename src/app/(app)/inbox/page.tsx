@@ -9,6 +9,8 @@ import { Avatar, Icon, PageHeader } from "@/components/ui";
 import { LiveRefresh } from "@/components/LiveRefresh";
 import { MessageList } from "@/components/MessageList";
 import { errMsg, logEvent } from "@/lib/log";
+import { audit } from "@/lib/audit";
+import { notify } from "@/lib/notify";
 
 export const maxDuration = 30;
 
@@ -47,29 +49,32 @@ async function reply(fd: FormData) {
     if (!upErr) break;
     if (i === 1) await logEvent({ orgId: org.id, level: "error", source: "inbox.reply", message: `delivered but status update failed: ${errMsg(upErr.message)}`, details: { channel: conv.channel } });
   }
-  await db.from("conversations").update({ last_message_at: new Date().toISOString(), unread: false }).eq("id", cid); // best effort: ordering hint only
+  await db.from("conversations").update({ last_message_at: new Date().toISOString(), last_direction: "out", unread: false }).eq("id", cid); // best effort: ordering hint only
   revalidatePath("/inbox");
 }
 
 async function setPartner(fd: FormData) {
   "use server";
-  const { db, isAdmin } = await requireSession();
+  const { db, org, member, isAdmin } = await requireSession();
   if (!isAdmin) throw new Error("Admins only");
   const pid = String(fd.get("partner") ?? "");
   if (pid) { const { data: p } = await db.from("partners").select("id").eq("id", pid).maybeSingle(); if (!p) throw new Error("Partner not found"); }   // RLS: must be in my workspace
   const { error } = await db.from("conversations").update({ partner_id: pid || null }).eq("id", String(fd.get("c")));
   if (error) throw new Error(error.message);
+  await audit({ orgId: org.id, actorId: member.id, action: "chat.link_partner", entity: "conversation", entityId: String(fd.get("c")), meta: { partner: pid || null } });
   revalidatePath("/inbox");
 }
 async function setOwner(fd: FormData) {
   "use server";
-  const { db, isAdmin } = await requireSession();
+  const { db, org, member, isAdmin } = await requireSession();
   if (!isAdmin) throw new Error("Admins only");
   const owner = String(fd.get("owner") ?? "");
   const { data: m } = await db.from("members").select("id").eq("id", owner).eq("status", "active").maybeSingle();   // RLS: must be in my workspace
   if (!m) throw new Error("Member not found");
   const { error } = await db.from("conversations").update({ owner_id: owner }).eq("id", String(fd.get("c")));
   if (error) throw new Error(error.message);
+  await audit({ orgId: org.id, actorId: member.id, action: "chat.assign", entity: "conversation", entityId: String(fd.get("c")), meta: { owner } });
+  if (owner !== member.id) await notify({ orgId: org.id, memberId: owner, title: "A chat was assigned to you", href: `/inbox?c=${String(fd.get("c"))}` });
   revalidatePath("/inbox");
 }
 
@@ -83,8 +88,9 @@ export default async function Inbox({ searchParams }: { searchParams: Promise<{ 
   const connected = new Set(conns.filter((x: any) => x.status === "connected").map((x: any) => x.kind));
   const open = c ?? chats[0]?.id;
   const current: any = chats.find((x: any) => x.id === open);
-  const msgsRes = open ? await db.from("messages").select("id,direction,sender_name,body,sent_at,delivery_status,error").eq("conversation_id", open).order("sent_at") : { data: [], error: null };
-  const msgs = msgsRes.data ?? [];
+  // newest 300, shown oldest-first: a plain ascending select returns the OLDEST 1000 and hides recent messages in long chats
+  const msgsRes = open ? await db.from("messages").select("id,direction,sender_name,body,sent_at,delivery_status,error").eq("conversation_id", open).order("sent_at", { ascending: false }).limit(300) : { data: [], error: null };
+  const msgs = [...(msgsRes.data ?? [])].reverse();
   const loadError = chatsRes.error ?? connsRes.error ?? msgsRes.error;
   if (current?.unread) await db.from("conversations").update({ unread: false }).eq("id", open); // best effort: read marker
   const [{ data: partners = [] }, { data: members = [] }] = isAdmin && current

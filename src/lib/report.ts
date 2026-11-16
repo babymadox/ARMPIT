@@ -14,8 +14,9 @@ export type Report = {
 export type EffectiveStatus = "working" | "built-unproven" | "blocked" | "partial" | "not-built";
 export function effective(f: Feature, r: Report): { status: EffectiveStatus; why?: string } {
   if (f.status === "not-built") return { status: "not-built" };
-  const failing = (f.needs ?? []).map((id) => r.checks.find((c) => c.id === id)).filter((c) => c && c.status === "fail");
-  if (failing.length) return { status: "blocked", why: failing.map((c) => c!.label).join("; ") };
+  // a need may name a single check ("schema.sources") or a group ("schema.workflow" matches schema.workflow.*)
+  const failing = (f.needs ?? []).flatMap((id) => r.checks.filter((c) => c.id === id || c.id.startsWith(id + "."))).filter((c) => c.status === "fail");
+  if (failing.length) return { status: "blocked", why: failing.map((c) => c.label).join("; ") };
   if (f.status === "partial") return { status: "partial", why: f.note };
   if (f.manual && f.verifiedManually) return { status: "working", why: `confirmed manually ${f.verifiedManually}` };
   if (f.manual) return { status: "built-unproven", why: f.note ?? "needs a manual check" };

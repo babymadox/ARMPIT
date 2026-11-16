@@ -8,11 +8,12 @@ import { readCreds, storeCreds } from "@/lib/secrets";
 import { siteOrigin, webhookUrl } from "@/lib/site";
 import { PageHeader } from "@/components/ui";
 import { errMsg, logEvent } from "@/lib/log";
+import { audit } from "@/lib/audit";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 
 async function connectTracker(fd: FormData) {
   "use server";
-  const { org, isAdmin } = await requireSession();
+  const { org, member, isAdmin } = await requireSession();
   if (!isAdmin) throw new Error("Admins only");
   const kind = String(fd.get("kind")) as keyof typeof adapters;
   const creds = { api_key: String(fd.get("api_key")) };
@@ -22,6 +23,7 @@ async function connectTracker(fd: FormData) {
   const { error } = await supabaseAdmin().from("tracker_connections").insert({ org_id: org.id, kind, label: String(fd.get("label") || kind), vault_secret_id: secret });
   if (error) return back(`Could not save the connection: ${error.message}`);
   await logEvent({ orgId: org.id, level: "info", source: "tracker.connect", message: `${kind} connected` });
+  await audit({ orgId: org.id, actorId: member.id, action: "tracker.connect", entity: "tracker", meta: { kind } });
   revalidatePath("/settings");
 }
 
@@ -50,18 +52,20 @@ async function connectTelegram(fd: FormData) {
     return back(`Could not connect: ${e instanceof Error ? e.message : e}`);
   }
   await logEvent({ orgId: org.id, level: "info", source: "channel.telegram", message: "connected" });
+  await audit({ orgId: org.id, actorId: member.id, action: "channel.connect", entity: "channel", meta: { channel: "telegram" } });
   revalidatePath("/settings"); revalidatePath("/inbox");
   back("Telegram connected. Now add the bot to a partner group and send a message.");
 }
 
 async function disconnectTelegram(fd: FormData) {
   "use server";
-  const { db, org, isAdmin } = await requireSession();
+  const { db, org, member, isAdmin } = await requireSession();
   if (!isAdmin) throw new Error("Admins only");
   const id = String(fd.get("id"));
   const { data: c } = await db.from("channel_connections").select("id,vault_secret_id").eq("id", id).maybeSingle();
   if (c) { try { await channels.telegram.disconnect(await readCreds(c.vault_secret_id, org.id)); } catch { /* best effort */ } const { error } = await db.from("channel_connections").delete().eq("id", id); if (error) return back(`Could not disconnect: ${error.message}`); }
   await logEvent({ orgId: org.id, level: "info", source: "channel.telegram", message: "disconnected" });
+  await audit({ orgId: org.id, actorId: member.id, action: "channel.disconnect", entity: "channel", meta: { channel: "telegram" } });
   revalidatePath("/settings"); revalidatePath("/inbox");
   back("Telegram disconnected. Existing conversations are kept.");
 }
@@ -71,7 +75,7 @@ export default async function Settings({ searchParams }: { searchParams: Promise
   const { db, org, isAdmin } = await requireSession();
   const [{ data: trackers = [] }, { data: audit = [] }, { data: tg = [] }] = await Promise.all([
     db.from("tracker_connections").select("id,kind,label,status,last_synced_at"),
-    isAdmin ? db.from("audit_log").select("id,action,entity,created_at").order("created_at", { ascending: false }).limit(20) : Promise.resolve({ data: [] }),
+    isAdmin ? db.from("audit_log").select("id,action,entity,created_at,actor:members(full_name,email)").order("created_at", { ascending: false }).limit(10) : Promise.resolve({ data: [] }),
     db.from("channel_connections").select("id,external_account,status,vault_secret_id").eq("kind", "telegram"),
   ]);
   const tgConn: any = tg![0];
@@ -115,7 +119,7 @@ export default async function Settings({ searchParams }: { searchParams: Promise
       <h2>Diagnostics</h2>
       <div className="card between"><span className="mut">Checks the database setup, settings and integrations, and shows what has been proven to work.</span><Link href="/settings/diagnostics"><button>Open diagnostics</button></Link></div>
       <h2>Billing</h2><div className="card mut">TODO: Stripe Checkout and customer portal, driven by seats.</div>
-      {isAdmin && <><h2>Audit log</h2><div className="card">{audit!.map((a: any) => <div key={a.id}>{a.action} <span className="mut">{a.entity}</span></div>)}</div></>}
+      {isAdmin && <><h2>Audit log</h2><div className="card">{audit!.map((a: any) => <div key={a.id}>{a.action} <span className="mut">· {a.actor?.full_name ?? a.actor?.email ?? "System"}</span></div>)}{!audit!.length && <span className="mut">Nothing recorded yet.</span>}<p style={{ margin: "10px 0 0" }}><Link href="/settings/audit">View the full audit log →</Link></p></div></>}
     </>
   );
 }

@@ -37,6 +37,11 @@ export async function buildReport(orgId: string, { origin, includeSystem }: Opts
     probe("schema.delivery", "Message delivery columns (migration 7)", MIGRATION(7, "20261114000007_message_delivery.sql"), () => db.from("messages").select("delivery_status,error").limit(0)),
     probe("schema.events", "app_events table (migration 9)", MIGRATION(9, "20261114000009_app_events.sql"), () => db.from("app_events").select("id").limit(0)),
   ]);
+  await Promise.all([
+    probe("schema.workflow.conv", "Chat recency columns (migration 10)", MIGRATION(10, "20261114000010_workflow_features.sql"), () => db.from("conversations").select("last_direction,last_inbound_at").limit(0)),
+    probe("schema.workflow.pay", "Payment decision columns (migration 10)", MIGRATION(10, "20261114000010_workflow_features.sql"), () => db.from("payments").select("agreed_amount,decided_at").limit(0)),
+    probe("schema.workflow.notif", "Notification dedupe column (migration 10)", MIGRATION(10, "20261114000010_workflow_features.sql"), () => db.from("notifications").select("dedupe_key").limit(0)),
+  ]);
   try {
     const { error } = await db.rpc("read_secret_for_org", { secret_id: crypto.randomUUID(), org: orgId });
     const missing = !!error && (error as { code?: string }).code === "PGRST202";
@@ -85,6 +90,12 @@ export async function buildReport(orgId: string, { origin, includeSystem }: Opts
     latest("partners.exist", "A partner exists", () => db.from("partners").select("created_at").eq("org_id", orgId).order("created_at", { ascending: false }).limit(1), (r) => r?.created_at, counts["partners"] != null ? `${counts["partners"]} partners` : undefined),
     latest("tasks.exist", "A task was created", () => db.from("tasks").select("created_at").eq("org_id", orgId).order("created_at", { ascending: false }).limit(1), (r) => r?.created_at),
     latest("singular.connected", "Singular was connected", () => db.from("tracker_connections").select("created_at").eq("org_id", orgId).eq("kind", "singular").order("created_at", { ascending: false }).limit(1), (r) => r?.created_at),
+    latest("invites.sent", "An invite email was sent", () => db.from("app_events").select("created_at").eq("org_id", orgId).eq("source", "team.invite").eq("level", "info").like("message", "invite email sent%").order("created_at", { ascending: false }).limit(1), (r) => r?.created_at),
+    latest("deals.created", "A deal was created in the app", () => db.from("deals").select("created_at").eq("org_id", orgId).not("requested_by", "is", null).order("created_at", { ascending: false }).limit(1), (r) => r?.created_at),
+    latest("payments.decided", "A payment decision was recorded", () => db.from("payments").select("decided_at").eq("org_id", orgId).not("decided_at", "is", null).order("decided_at", { ascending: false }).limit(1), (r) => r?.decided_at),
+    latest("audit.written", "An audit entry was written", () => db.from("audit_log").select("created_at").eq("org_id", orgId).order("created_at", { ascending: false }).limit(1), (r) => r?.created_at),
+    latest("notifications.created", "A notification was created", () => db.from("notifications").select("created_at").eq("org_id", orgId).order("created_at", { ascending: false }).limit(1), (r) => r?.created_at),
+    latest("agent.answered", "The AI agent answered a question", () => db.from("app_events").select("created_at").eq("org_id", orgId).eq("source", "agent").eq("message", "answered").order("created_at", { ascending: false }).limit(1), (r) => r?.created_at),
     latest("events.recent", "Event log is recording", () => db.from("app_events").select("created_at").or(`org_id.eq.${orgId},org_id.is.null`).order("created_at", { ascending: false }).limit(1), (r) => r?.created_at),
   ]);
 

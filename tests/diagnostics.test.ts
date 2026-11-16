@@ -46,7 +46,8 @@ test("built features are 'working' only with proof, otherwise 'built-unproven'",
   assert.equal(effective(feat("singular.sync"), r).status, "working");
   assert.equal(effective(feat("telegram.in"), r).status, "built-unproven");
   assert.equal(effective(feat("chan.gmail"), r).status, "not-built");
-  assert.equal(effective(feat("deals"), r).status, "partial");
+  assert.equal(effective(feat("deals"), r).status, "built-unproven", "built, but nobody has created a deal in the app yet");
+  assert.equal(effective({ id: "x", area: "t", name: "t", status: "partial", note: "half done" }, r).status, "partial");
 });
 test("next actions list fixes first, then errors, with no duplicates", () => {
   const a = nextActions(base({ checks: [...base().checks, { id: "x", group: "Database", label: "dup", status: "fail", fix: "Run migration 7" }] }));
@@ -69,4 +70,10 @@ test("a manual-check feature is 'working' only once a person has confirmed it, a
   assert.equal(e.status, "working"); assert.match(e.why!, /confirmed manually/);
   const unconfirmed = effective({ ...feat("inbox.live"), verifiedManually: undefined }, r);
   assert.equal(unconfirmed.status, "built-unproven"); assert.match(unconfirmed.why!, /two windows/);
+});
+
+test("a missing migration 10 blocks every feature that needs it, via the schema.workflow group", () => {
+  const r = base({ checks: [...base().checks.map((c) => ({ ...c, status: "ok" as const })), { id: "schema.workflow.pay", group: "Database", label: "Payment decision columns (migration 10)", status: "fail", fix: "Run migration 10" }] });
+  for (const id of ["deals", "payments", "automations", "audit", "notifications"]) { const e = effective(feat(id), r); assert.equal(e.status, "blocked", id); assert.match(e.why!, /migration 10/); }
+  assert.notEqual(effective(feat("partners"), r).status, "blocked");
 });

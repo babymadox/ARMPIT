@@ -2,6 +2,7 @@ import Link from "next/link";
 import { revalidatePath } from "next/cache";
 import { requireSession } from "@/lib/session";
 import { Chip } from "@/components/Chip";
+import { audit } from "@/lib/audit";
 import { Avatar, PageHeader } from "@/components/ui";
 
 async function addPartner(fd: FormData) {
@@ -12,6 +13,7 @@ async function addPartner(fd: FormData) {
     contact_name: String(fd.get("contact") || "") || null, owner_id: member.id,
   });
   if (error) throw new Error(error.message);
+  await audit({ orgId: org.id, actorId: member.id, action: "partner.create", entity: "partner", meta: { name: String(fd.get("name")), type: String(fd.get("type")) } });
   revalidatePath("/partners");
 }
 

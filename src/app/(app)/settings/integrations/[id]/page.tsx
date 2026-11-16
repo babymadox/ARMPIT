@@ -7,6 +7,8 @@ import { syncConnection } from "@/lib/sync";
 import { Chip } from "@/components/Chip";
 import { PageHeader } from "@/components/ui";
 import { ago } from "@/lib/format";
+import { fetchAll } from "@/lib/db";
+import { audit } from "@/lib/audit";
 
 /** Every action re-checks admin + that the connection belongs to the caller's org (RLS read via the user client). */
 async function guard(connectionId: string) {
@@ -22,6 +24,7 @@ async function importStructure(fd: FormData) {
   "use server";
   const id = String(fd.get("conn")), { member, org } = await guard(id);
   const r = await syncConnection({ orgId: org.id }, id, 30, { autoLink: true, ownerId: member.id }).catch((e) => ({ error: e instanceof Error ? e.message : String(e) }));
+  if (!("error" in r)) await audit({ orgId: org.id, actorId: member.id, action: "structure.import", entity: "tracker", entityId: id, meta: { newPartners: r.createdPartners, newLinks: r.createdLinks } });
   back(id, "error" in r ? `Import failed: ${r.error}` : `Imported: ${r.createdPartners} new partners, ${r.createdLinks} new source links, ${r.rows} data rows`);
 }
 async function syncNow(fd: FormData) {
@@ -34,25 +37,28 @@ async function syncNow(fd: FormData) {
 async function mapAgency(fd: FormData) {
   "use server";
   const id = String(fd.get("conn")), agency = String(fd.get("agency")), partnerId = String(fd.get("partner") ?? "");
-  const { db, org } = await guard(id);
+  const { db, org, member } = await guard(id);
   if (!partnerId) return back(id, "Choose a partner first", "agency");
   const { data: p } = await db.from("partners").select("id").eq("id", partnerId).maybeSingle();   // RLS: must be in my org
   if (!p) throw new Error("Partner not found");
   const admin = supabaseAdmin();
-  const { data: pairs = [], error: e1 } = await admin.from("tracker_sources").select("external_id").eq("org_id", org.id).eq("connection_id", id).eq("external_group", agency);
-  if (e1) return back(id, `Could not read sources: ${e1.message}`, "agency");
-  if (!pairs!.length) return back(id, `No sources found for ${agency}`, "agency");
-  const { error: e2 } = await admin.from("partner_links").upsert(pairs!.map((x) => ({ org_id: org.id, connection_id: id, partner_id: partnerId, external_id: x.external_id, external_group: agency })), { onConflict: "connection_id,external_id,external_group" });
+  let pairs: { external_id: string }[];
+  try { pairs = await fetchAll<{ external_id: string }>((f, t) => admin.from("tracker_sources").select("external_id").eq("org_id", org.id).eq("connection_id", id).eq("external_group", agency).order("id").range(f, t)); }
+  catch (e) { return back(id, `Could not read sources: ${e instanceof Error ? e.message : e}`, "agency"); }
+  if (!pairs.length) return back(id, `No sources found for ${agency}`, "agency");
+  const { error: e2 } = await admin.from("partner_links").upsert(pairs.map((x) => ({ org_id: org.id, connection_id: id, partner_id: partnerId, external_id: x.external_id, external_group: agency })), { onConflict: "connection_id,external_id,external_group" });
   if (e2) return back(id, `Could not map ${agency}: ${e2.message}`, "agency");   // never report success for a failed write
+  await audit({ orgId: org.id, actorId: member.id, action: "structure.map", entity: "partner", entityId: partnerId, meta: { agency, sources: pairs.length } });
   const r = await syncConnection({ orgId: org.id }, id, 30).catch(() => null);
-  back(id, `Mapped ${agency} to the partner (${pairs!.length} sources)${r ? "" : ". Backfill failed, try Sync"}`, "agency");
+  back(id, `Mapped ${agency} to the partner (${pairs.length} sources)${r ? "" : ". Backfill failed, try Sync"}`, "agency");
 }
 async function unlinkAgency(fd: FormData) {
   "use server";
-  const id = String(fd.get("conn")), agency = String(fd.get("agency")), { org } = await guard(id);
+  const id = String(fd.get("conn")), agency = String(fd.get("agency")), { org, member } = await guard(id);
   // Deleting links also deletes the stats synced for them (FK cascade). Import or map again to backfill 30 days.
   const { error } = await supabaseAdmin().from("partner_links").delete().eq("connection_id", id).eq("org_id", org.id).eq("external_group", agency);
   if (error) return back(id, `Could not unlink ${agency}: ${error.message}`, "agency");
+  await audit({ orgId: org.id, actorId: member.id, action: "structure.unlink", entity: "tracker", entityId: id, meta: { agency } });
   back(id, `Unlinked ${agency}`, "agency");
 }
 
@@ -62,13 +68,14 @@ export default async function StructurePage({ params, searchParams }: { params: 
   const { db, isAdmin } = await requireSession();
   const { data: conn } = await db.from("tracker_connections").select("id,kind,label,status,last_synced_at").eq("id", id).maybeSingle();
   if (!conn) notFound();
-  const [{ data: pairs = [] }, { data: links = [] }, { data: partners = [] }] = await Promise.all([
-    db.from("tracker_sources").select("external_id,external_group").eq("connection_id", id).limit(20000),
-    db.from("partner_links").select("external_id,external_group,partner:partners(id,name)").eq("connection_id", id).limit(20000),
-    db.from("partners").select("id,name").order("name"),
+  // Page through every row: a plain select is silently capped at 1000 and an account can have thousands of pairs.
+  const [pairs, links, partners] = await Promise.all([
+    fetchAll<{ external_id: string; external_group: string }>((f, t) => db.from("tracker_sources").select("external_id,external_group").eq("connection_id", id).order("id").range(f, t)),
+    fetchAll<any>((f, t) => db.from("partner_links").select("external_id,external_group,partner:partners(id,name)").eq("connection_id", id).order("id").range(f, t)),
+    fetchAll<{ id: string; name: string }>((f, t) => db.from("partners").select("id,name").order("name").order("id").range(f, t)),
   ]);
   const partnerOf = new Map<string, { id: string; name: string }>();            // agency -> partner
-  links!.forEach((l: any) => { if (l.partner) partnerOf.set(l.external_group, l.partner); });
+  links.forEach((l: any) => { if (l.partner) partnerOf.set(l.external_group, l.partner); });
   const byAgency = new Map<string, string[]>(), bySource = new Map<string, string[]>();
   (pairs as Pair[]).forEach((p) => {
     if (p.external_group) (byAgency.get(p.external_group) ?? byAgency.set(p.external_group, []).get(p.external_group)!).push(p.external_id);
@@ -114,12 +121,12 @@ export default async function StructurePage({ params, searchParams }: { params: 
                 <form action={unlinkAgency} style={{ marginTop: 10 }}><input type="hidden" name="conn" value={id} /><input type="hidden" name="agency" value={a} /><button title="Also deletes the stats synced for this agency">Unlink</button></form>
               ) : (
                 <form action={mapAgency} className="row" style={{ marginTop: 10, marginBottom: 0 }}><input type="hidden" name="conn" value={id} /><input type="hidden" name="agency" value={a} />
-                  <select name="partner" aria-label={`Partner for ${a}`}><option value="">Map to existing partner…</option>{partners!.map((x: any) => <option key={x.id} value={x.id}>{x.name}</option>)}</select><button>Map</button></form>
+                  <select name="partner" aria-label={`Partner for ${a}`}><option value="">Map to existing partner…</option>{partners.map((x: any) => <option key={x.id} value={x.id}>{x.name}</option>)}</select><button>Map</button></form>
               ))}
             </div>);
         })}</div>
       )}
-      {!pairs!.length && <div className="empty"><b>Nothing here yet</b><p>Click “Import structure from {conn.kind}” to load your agencies and sources.</p></div>}
+      {!pairs.length && <div className="empty"><b>Nothing here yet</b><p>Click “Import structure from {conn.kind}” to load your agencies and sources.</p></div>}
       {(view === "source" ? sources : agencies).length > 200 && <p className="mut">Showing the first 200. Use search to narrow down.</p>}
     </>
   );

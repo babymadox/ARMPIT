@@ -115,7 +115,33 @@ print(f"{G}  events are redacted before they are stored (log.ts uses buildEventR
 raw = [f for f in files if re.search(r'from\("app_events"\)\s*\.insert', pathlib.Path(f).read_text().replace("\n", " ")) and not f.endswith("lib/log.ts")]
 print(f"{G}  app_events is only written through logEvent" if not raw else f"{R}  direct app_events inserts bypass redaction: {raw}"); fails += bool(raw)
 
-# 13. leftovers
+# 13. Supabase silently caps every plain select at 1000 rows. A .limit() above that is a bug (it returns 1000 and no error);
+#     reads that need everything must page with fetchAll() or aggregate in SQL (rpc).
+caps = []
+for f in files:
+    for n, line in enumerate(pathlib.Path(f).read_text().split("\n"), 1):
+        m = re.search(r'\.limit\((\d[\d_]*)\)', line)
+        if m and int(m.group(1).replace("_", "")) > 1000: caps.append(f"{f}:{n}: .limit({m.group(1)})")
+print(f"{G}  no .limit() above Supabase's 1000-row cap" if not caps else f"{R}  .limit() above 1000 is silently capped; page with fetchAll() or use an rpc aggregate:\n    " + "\n    ".join(caps)); fails += bool(caps)
+unbounded = []
+for f in files:
+    t = pathlib.Path(f).read_text()
+    for m in re.finditer(r'from\("(tracker_stats|tracker_sources|partner_links|messages)"\)\.select\([^;]*?(?=;|\n\n)', t, re.S):
+        stmt = m.group(0)
+        if not re.search(r'limit\(|range\(|head: true|maybeSingle|single\(\)|count', stmt): unbounded.append(f"{f}: {stmt[:90].strip()}…")
+print(f"{G}  high-volume tables are never read without a limit, range or count" if not unbounded else f"{Y}  reads of high-volume tables with no limit/range (capped at 1000 rows):\n    " + "\n    ".join(unbounded))
+
+# 14. every server action that changes data should leave an audit entry (WARN: some changes are deliberately not audited)
+noaudit = []
+for f in files:
+    t = pathlib.Path(f).read_text()
+    if '"use server"' not in t or "app/login" in f or "onboarding" in f: continue
+    for m in re.finditer(r'async function (\w+)\([^)]*\)\s*\{\s*"use server";(.*?)\n\}', t, re.S):
+        body = m.group(2)
+        if re.search(r'\.(insert|update|upsert|delete)\(', body) and "audit(" not in body: noaudit.append(f"{f}: {m.group(1)}")
+print(f"{G}  every data-changing server action writes an audit entry" if not noaudit else f"{Y}  data-changing server actions with no audit entry (fine if deliberate, e.g. read markers):\n    " + "\n    ".join(noaudit))
+
+# 15. leftovers
 todo = sh(r"grep -rnE 'TODO|FIXME|VERIFY|XXX' src supabase --include=*.ts --include=*.tsx --include=*.sql | wc -l").strip()
 print(f"{Y}  {todo} TODO/FIXME/VERIFY markers (list: grep -rnE 'TODO|FIXME|VERIFY' src supabase)")
 stubs = sh(r"grep -rlE 'not implemented yet|is not set up yet' src | wc -l").strip()

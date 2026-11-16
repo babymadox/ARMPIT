@@ -11,7 +11,7 @@ Events live in `app_events` (migration 9), are redacted before storage (`src/lib
 
 ## Hosted Supabase
 
-The Supabase project (ref `nhnwzxttpncechcgqqvl`, ap-south-1) has migrations 1 to 4 applied. **Migrations 5 to 9 may not be applied yet.** Settings → Diagnostics shows exactly which are missing. `supabase/catch-up.sql` contains 5 to 9 in order; run it only if none of them has been applied (5 to 7 are not repeatable; 8 and 9 are). Run `npx supabase db push` or paste `supabase/migrations/20261114000005_tracker_sources.sql` into the SQL editor. `.env.example` points at it; add the service-role key yourself.
+The Supabase project (ref `nhnwzxttpncechcgqqvl`, ap-south-1) has migrations 1 to 4 applied. **Migrations 5 to 10 may not be applied yet.** Settings → Diagnostics shows exactly which are missing. `supabase/catch-up.sql` contains 5 to 10 in order; run it only if none of 5-7 has been applied (5 to 7 are not repeatable; 8, 9 and 10 are). Run `npx supabase db push` or paste `supabase/migrations/20261114000005_tracker_sources.sql` into the SQL editor. `.env.example` points at it; add the service-role key yourself.
 
 ## Run it locally
 
