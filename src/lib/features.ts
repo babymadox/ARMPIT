@@ -1,26 +1,27 @@
 /**
  * What the product does and how far each part is. This is the single place to update when something is built.
  * `needs` lists schema/env checks that must pass for the feature to actually work; `evidence` names the proof
- * (a timestamp the app records when the feature really ran) shown in diagnostics.
+ * (a timestamp the app records when the feature really ran) shown in diagnostics. A feature marked "done" must have
+ * `evidence`, or `manual: true` when nothing can prove it automatically (it then shows as built-unproven).
  */
 export type FeatureStatus = "done" | "partial" | "not-built";
-export type Feature = { id: string; area: string; name: string; status: FeatureStatus; note?: string; needs?: string[]; evidence?: string };
+export type Feature = { id: string; area: string; name: string; status: FeatureStatus; note?: string; needs?: string[]; evidence?: string; manual?: boolean };
 
 export const FEATURES: Feature[] = [
-  { id: "auth", area: "Core", name: "Sign-in, workspaces, roles", status: "done", needs: ["env.service_role"] },
+  { id: "auth", area: "Core", name: "Sign-in, workspaces, roles", status: "done", needs: ["env.service_role"], evidence: "auth.members" },
   { id: "invites", area: "Core", name: "Team invites", status: "partial", note: "Invites are saved; no invite email is sent" },
-  { id: "partners", area: "Partners", name: "Partners list, pipeline, detail, notes", status: "done" },
-  { id: "singular.connect", area: "Singular", name: "Connect Singular (key check, Vault)", status: "done", needs: ["schema.vault"] },
+  { id: "partners", area: "Partners", name: "Partners list, pipeline, detail, notes", status: "done", evidence: "partners.exist" },
+  { id: "singular.connect", area: "Singular", name: "Connect Singular (key check, Vault)", status: "done", needs: ["schema.vault"], evidence: "singular.connected" },
   { id: "singular.sync", area: "Singular", name: "Sync stats (14 metrics per source/agency pair)", status: "done", needs: ["schema.sources"], evidence: "singular.sync" },
   { id: "singular.structure", area: "Singular", name: "Import/map agencies and sources", status: "done", needs: ["schema.sources", "schema.pairs"], evidence: "structure.links" },
   { id: "columns", area: "Singular", name: "Partner page column picker", status: "done", evidence: "stats.rows" },
   { id: "deals", area: "Deals & payments", name: "Deals list and status flow", status: "partial", note: "No 'new deal' form" },
   { id: "payments", area: "Deals & payments", name: "Payments list and status flow", status: "partial", note: "No adjustments or decision forms" },
-  { id: "tasks", area: "Core", name: "Tasks on Overview", status: "done" },
+  { id: "tasks", area: "Core", name: "Tasks on Overview", status: "done", evidence: "tasks.exist" },
   { id: "automations", area: "Automations", name: "Automations (silent-partner trigger only)", status: "partial", note: "Other triggers are not built", evidence: "automations.run" },
   { id: "telegram.in", area: "Inbox", name: "Telegram: receive messages", status: "done", needs: ["schema.delivery"], evidence: "telegram.inbound" },
   { id: "telegram.out", area: "Inbox", name: "Telegram: send replies", status: "done", needs: ["schema.delivery", "schema.secrets"], evidence: "reply.delivered" },
-  { id: "inbox.live", area: "Inbox", name: "Inbox live refresh", status: "done" },
+  { id: "inbox.live", area: "Inbox", name: "Inbox live refresh", status: "done", manual: true, note: "Open the inbox in two windows, send a Telegram message, and check it appears without a refresh" },
   { id: "chan.whatsapp", area: "Inbox", name: "WhatsApp", status: "not-built" },
   { id: "chan.teams", area: "Inbox", name: "Microsoft Teams", status: "not-built" },
   { id: "chan.gmail", area: "Inbox", name: "Gmail", status: "not-built" },

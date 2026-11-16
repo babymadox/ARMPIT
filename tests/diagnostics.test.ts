@@ -59,3 +59,12 @@ test("the markdown report has every section, shows the digest, and carries no se
   for (const h of ["# ARMPIT diagnostics", "## Next actions", "## Environment", "## Database", "## Features", "## Last proven working", "## Recent problems"]) assert.ok(md.includes(h), h);
   assert.ok(md.includes("digest 1178203295")); assert.ok(!md.includes(bot)); assert.ok(md.includes("never"), "unproven evidence says never");
 });
+
+test("every feature marked done has automatic proof or is flagged for a manual check", () => {
+  for (const f of FEATURES.filter((f) => f.status === "done")) assert.ok(f.evidence || f.manual, `${f.id} is done with no way to prove it`);
+});
+test("a manual-check feature is never reported as working", () => {
+  const r = base({ checks: base().checks.map((c) => ({ ...c, status: "ok" as const })) });
+  const e = effective(feat("inbox.live"), r);
+  assert.equal(e.status, "built-unproven"); assert.match(e.why!, /two windows/);
+});

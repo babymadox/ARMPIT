@@ -3,6 +3,7 @@ import { channels } from "./integrations";
 import { readCreds } from "./secrets";
 import { webhookUrl } from "./site";
 import { errMsg } from "./scrub.ts";
+import { logEvent } from "./log";
 import type { Check, Evidence, EventRow, Report } from "./report.ts";
 
 type Opts = { origin: string; includeSystem: boolean };
@@ -11,6 +12,7 @@ const MIGRATION = (n: number, file: string) => `Run migration ${n} (supabase/mig
 /** Builds the diagnostics report for one workspace. Every probe is independent: one failing never hides the rest. */
 export async function buildReport(orgId: string, { origin, includeSystem }: Opts): Promise<Report> {
   const db = supabaseAdmin();
+  await logEvent({ orgId, level: "info", source: "diagnostics", message: "report generated" });   // write now, read back below: proves the event log round trip
   const checks: Check[] = [], evidence: Evidence[] = [], counts: Record<string, number | null> = {};
   const probe = async (id: string, label: string, fix: string, run: () => PromiseLike<{ error: { message: string } | null }>) => {
     try { const { error } = await run(); checks.push({ id, group: "Database", label, status: error ? "fail" : "ok", detail: error?.message, fix: error ? fix : undefined }); }
@@ -79,6 +81,10 @@ export async function buildReport(orgId: string, { origin, includeSystem }: Opts
     latest("reply.delivered", "Reply delivered to a channel", () => db.from("messages").select("sent_at").eq("org_id", orgId).eq("direction", "out").eq("delivery_status", "sent").not("external_id", "is", null).order("sent_at", { ascending: false }).limit(1), (r) => r?.sent_at),
     latest("automations.run", "An automation ran", () => db.from("automations").select("last_run_at").eq("org_id", orgId).not("last_run_at", "is", null).order("last_run_at", { ascending: false }).limit(1), (r) => r?.last_run_at),
     latest("cron.sync", "Scheduled sync ran", () => db.from("app_events").select("created_at").like("source", "cron.sync%").order("created_at", { ascending: false }).limit(1), (r) => r?.created_at),
+    latest("auth.members", "A member joined the workspace", () => db.from("members").select("created_at").eq("org_id", orgId).eq("status", "active").order("created_at", { ascending: false }).limit(1), (r) => r?.created_at, counts["members"] != null ? `${counts["members"]} members` : undefined),
+    latest("partners.exist", "A partner exists", () => db.from("partners").select("created_at").eq("org_id", orgId).order("created_at", { ascending: false }).limit(1), (r) => r?.created_at, counts["partners"] != null ? `${counts["partners"]} partners` : undefined),
+    latest("tasks.exist", "A task was created", () => db.from("tasks").select("created_at").eq("org_id", orgId).order("created_at", { ascending: false }).limit(1), (r) => r?.created_at),
+    latest("singular.connected", "Singular was connected", () => db.from("tracker_connections").select("created_at").eq("org_id", orgId).eq("kind", "singular").order("created_at", { ascending: false }).limit(1), (r) => r?.created_at),
     latest("events.recent", "Event log is recording", () => db.from("app_events").select("created_at").or(`org_id.eq.${orgId},org_id.is.null`).order("created_at", { ascending: false }).limit(1), (r) => r?.created_at),
   ]);
 
@@ -86,7 +92,7 @@ export async function buildReport(orgId: string, { origin, includeSystem }: Opts
   const scope = (q: any) => (includeSystem ? q.or(`org_id.eq.${orgId},org_id.is.null`) : q.eq("org_id", orgId));
   const [bad, info] = await Promise.all([
     safe(async () => (await scope(db.from("app_events").select("level,source,message,digest,created_at,org_id").in("level", ["warn", "error"]).order("created_at", { ascending: false }).limit(30))).data ?? [], [] as EventRow[]),
-    safe(async () => (await scope(db.from("app_events").select("level,source,message,digest,created_at,org_id").eq("level", "info").order("created_at", { ascending: false }).limit(15))).data ?? [], [] as EventRow[]),
+    safe(async () => (await scope(db.from("app_events").select("level,source,message,digest,created_at,org_id").eq("level", "info").neq("source", "diagnostics").order("created_at", { ascending: false }).limit(15))).data ?? [], [] as EventRow[]),
   ]);
   return {
     generatedAt: new Date().toISOString(),
