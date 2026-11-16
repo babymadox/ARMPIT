@@ -43,7 +43,8 @@ It prints PASS / WARN / FAIL per check. Treat every WARN as a lead to read, not 
 10. **Row cap:** Supabase returns at most 1000 rows per request and says nothing. Anything that needs all rows uses `fetchAll()` (src/lib/db.ts) or an SQL aggregate (`link_metric_totals`, `partner_metric_sums`); never `.limit(5000)`.
 11. **Privacy:** notifications are private to their recipient (RLS); the audit log is admin-only; both are written by the server only (`notify`, `audit`).
 12. **Logging:** notable events go through `logEvent` (never `console.log` of user data). `scrub`/`buildEventRow` strip tokens, keys and message text; keep it that way. Update `src/lib/features.ts` whenever a feature is built or its status changes: diagnostics reads it.
-13. **Deletes that cascade** (unlinking an agency deletes its stats) must say so in the UI.
+13. **Mail hosts are user input:** every IMAP/SMTP connection goes through `resolvePublic` (src/lib/email/net.ts): public IPs only, standard ports only. Mail credentials live in Vault; never log them.
+14. **Deletes that cascade** (unlinking an agency deletes its stats) must say so in the UI.
 
 ## 4. Verification discipline
 - Run `npx tsc --noEmit`, `npm test`, and `NEXT_PUBLIC_SUPABASE_URL=http://x NEXT_PUBLIC_SUPABASE_ANON_KEY=x npx next build` after `rm -rf .next` (stale `.next` types cause false failures).

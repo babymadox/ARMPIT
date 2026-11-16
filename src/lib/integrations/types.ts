@@ -13,11 +13,13 @@ export interface TrackerAdapter {
   fetchStats(creds: Record<string, string>, from: string, to: string): Promise<MetricRow[]>;
 }
 
-export type InboundMessage = { externalConversationId: string; externalId: string; title?: string; sender: string; body: string; sentAt: string; attachments?: { name: string; kind: string }[] };
+export type InboundMessage = { externalConversationId: string; externalId: string; title?: string; sender: string; body: string; sentAt: string; attachments?: { name: string; kind: string }[]; subject?: string };
+/** Extra context for channels that need it (email: subject and the message being answered). */
+export type SendContext = { subject?: string | null; inReplyTo?: string | null };
 export type Creds = Record<string, string>;
 
 export interface ChannelAdapter {
-  kind: "telegram" | "whatsapp" | "teams" | "gmail" | "linkedin";
+  kind: "telegram" | "whatsapp" | "teams" | "email" | "linkedin";
   /** Validate the credentials and register the provider's webhook. Returns the account label and the credentials to store (may add a webhook secret). */
   connect(creds: Creds, webhookUrl: string): Promise<{ account: string; creds: Creds }>;
   /** Remove the provider-side webhook. Best effort. */
@@ -26,5 +28,7 @@ export interface ChannelAdapter {
   status(creds: Creds, webhookUrl: string): Promise<{ ok: boolean; detail: string }>;
   /** Verify and parse one webhook delivery. Throws on a bad signature. Returns [] for updates we ignore. */
   parseWebhook(req: Request, creds: Creds): Promise<InboundMessage[]>;
-  send(creds: Creds, externalConversationId: string, body: string): Promise<{ externalId: string }>;
+  send(creds: Creds, externalConversationId: string, body: string, ctx?: SendContext): Promise<{ externalId: string }>;
+  /** For channels without webhooks (email): fetch new messages since `state` and return the next state. */
+  poll?(creds: Creds, state: unknown): Promise<{ messages: InboundMessage[]; state: unknown; stats: Record<string, number> }>;
 }

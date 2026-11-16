@@ -45,7 +45,7 @@ test("built features are 'working' only with proof, otherwise 'built-unproven'",
   const r = base({ checks: base().checks.map((c) => ({ ...c, status: "ok" as const })) });
   assert.equal(effective(feat("singular.sync"), r).status, "working");
   assert.equal(effective(feat("telegram.in"), r).status, "built-unproven");
-  assert.equal(effective(feat("chan.gmail"), r).status, "not-built");
+  assert.equal(effective(feat("chan.whatsapp"), r).status, "not-built");
   assert.equal(effective(feat("deals"), r).status, "built-unproven", "built, but nobody has created a deal in the app yet");
   assert.equal(effective({ id: "x", area: "t", name: "t", status: "partial", note: "half done" }, r).status, "partial");
 });

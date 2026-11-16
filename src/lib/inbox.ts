@@ -20,7 +20,7 @@ export async function ingestMessages(db: SupabaseClient, conn: Conn, msgs: Inbou
     const { data: conv, error } = await db.from("conversations").select("id,unread,owner_id,title").eq("org_id", conn.org_id).eq("channel", conn.kind).eq("external_id", m.externalConversationId).single();
     if (error || !conv) throw new Error(`conversation lookup failed: ${error?.message}`);
     const { data: inserted, error: e2 } = await db.from("messages").upsert(
-      { org_id: conn.org_id, conversation_id: conv.id, direction: "in", sender_name: m.sender, body: m.body, attachments: m.attachments ?? [], external_id: m.externalId, sent_at: m.sentAt },
+      { org_id: conn.org_id, conversation_id: conv.id, direction: "in", sender_name: m.sender, body: m.body, attachments: m.attachments ?? [], external_id: m.externalId, sent_at: m.sentAt, ...(m.subject ? { subject: m.subject } : {}) },
       { onConflict: "conversation_id,external_id", ignoreDuplicates: true }).select("id");
     if (e2) throw new Error(e2.message);
     if (inserted?.length) {

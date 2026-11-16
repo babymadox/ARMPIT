@@ -8,6 +8,8 @@ import { ago } from "@/lib/format";
 import { Avatar, Icon, PageHeader } from "@/components/ui";
 import { LiveRefresh } from "@/components/LiveRefresh";
 import { MessageList } from "@/components/MessageList";
+import { MailSync } from "@/components/MailSync";
+import { replySubject } from "@/lib/email/parse";
 import { errMsg, logEvent } from "@/lib/log";
 import { audit } from "@/lib/audit";
 import { notify } from "@/lib/notify";
@@ -16,7 +18,7 @@ export const maxDuration = 30;
 
 const CHANNELS = [
   { k: "telegram", n: "Telegram", c: "#229ed9", live: true }, { k: "whatsapp", n: "WhatsApp", c: "#25d366" }, { k: "teams", n: "Microsoft Teams", c: "#5b5fc7" },
-  { k: "gmail", n: "Gmail", c: "#ea4335" }, { k: "linkedin", n: "LinkedIn", c: "#0a66c2" },
+  { k: "email", n: "Email", c: "#ea4335", live: true }, { k: "linkedin", n: "LinkedIn", c: "#0a66c2" },
 ];
 
 /** Saves the reply, then delivers it through the channel. A failed delivery stays visible on the message. */
@@ -27,7 +29,12 @@ async function reply(fd: FormData) {
   if (!body) return;
   const { data: conv } = await db.from("conversations").select("id,channel,external_id,connection_id").eq("id", cid).maybeSingle();   // RLS: only chats I can see
   if (!conv) throw new Error("Conversation not found");
-  const { data: msg, error } = await db.from("messages").insert({ org_id: org.id, conversation_id: cid, direction: "out", sender_name: "You", body, delivery_status: "pending" }).select("id").single();
+  let ctx: { subject: string; inReplyTo: string | null } | null = null;
+  if (conv.channel === "email") {
+    const { data: last } = await db.from("messages").select("external_id,subject").eq("conversation_id", cid).eq("direction", "in").order("sent_at", { ascending: false }).limit(1).maybeSingle();
+    ctx = { subject: replySubject(last?.subject), inReplyTo: last?.external_id && /^<.+>$/.test(last.external_id) ? last.external_id : null };
+  }
+  const { data: msg, error } = await db.from("messages").insert({ org_id: org.id, conversation_id: cid, direction: "out", sender_name: "You", body, delivery_status: "pending", ...(ctx ? { subject: ctx.subject } : {}) }).select("id").single();
   if (error || !msg) throw new Error(error?.message ?? "Could not save the message");
   const admin = supabaseAdmin();
   const fail = async (e: unknown) => { await logEvent({ orgId: org.id, level: "warn", source: "inbox.reply", message: `delivery failed: ${errMsg(e)}`, details: { channel: conv.channel } }); await admin.from("messages").update({ delivery_status: "failed", error: e instanceof Error ? e.message : String(e) }).eq("id", msg.id); /* best effort: the user sees the failure either way */ };
@@ -39,7 +46,7 @@ async function reply(fd: FormData) {
     const { data: conn } = await admin.from("channel_connections").select("vault_secret_id,org_id").eq("id", conv.connection_id).eq("org_id", org.id).single();
     if (!conn) throw new Error("Channel connection not found");
     const adapter = (channels as Record<string, (typeof channels)[keyof typeof channels]>)[conv.channel];
-    externalId = (await adapter.send(await readCreds(conn.vault_secret_id, org.id), conv.external_id, body)).externalId;
+    externalId = (await adapter.send(await readCreds(conn.vault_secret_id, org.id), conv.external_id, body, ctx ?? undefined)).externalId;
   } catch (e) { await fail(e); revalidatePath("/inbox"); return; }
 
   // 2) Record it. The partner already has the message, so a failed update must never mark it "failed"
@@ -89,7 +96,9 @@ export default async function Inbox({ searchParams }: { searchParams: Promise<{ 
   const open = c ?? chats[0]?.id;
   const current: any = chats.find((x: any) => x.id === open);
   // newest 300, shown oldest-first: a plain ascending select returns the OLDEST 1000 and hides recent messages in long chats
-  const msgsRes = open ? await db.from("messages").select("id,direction,sender_name,body,sent_at,delivery_status,error").eq("conversation_id", open).order("sent_at", { ascending: false }).limit(300) : { data: [], error: null };
+  const fetchMsgs = (cols: string) => db.from("messages").select(cols).eq("conversation_id", open).order("sent_at", { ascending: false }).limit(300);
+  let msgsRes: { data: any[] | null; error: { message: string } | null } = open ? await fetchMsgs("id,direction,sender_name,body,sent_at,delivery_status,error,subject") as any : { data: [], error: null };
+  if (open && msgsRes.error && /subject/.test(msgsRes.error.message)) msgsRes = await fetchMsgs("id,direction,sender_name,body,sent_at,delivery_status,error") as any;   // migration 11 (email) not applied yet: chats still work
   const msgs = [...(msgsRes.data ?? [])].reverse();
   const loadError = chatsRes.error ?? connsRes.error ?? msgsRes.error;
   if (current?.unread) await db.from("conversations").update({ unread: false }).eq("id", open); // best effort: read marker
@@ -100,6 +109,7 @@ export default async function Inbox({ searchParams }: { searchParams: Promise<{ 
   return (
     <div className="inbox">
       <LiveRefresh />
+      {connected.has("email" as any) && <MailSync />}
       <PageHeader title="Inbox" sub="Every partner conversation, from every channel" />
       {loadError && <div className="notice" role="alert" style={{ borderColor: "var(--bad)" }}><b>Part of the inbox could not load.</b> {loadError.message}. This usually means a database update is pending: run <code>supabase/catch-up.sql</code> (or migration 7) in the Supabase SQL editor.</div>}
       {chats.length ? (
@@ -145,6 +155,7 @@ export default async function Inbox({ searchParams }: { searchParams: Promise<{ 
             {msgs.map((m: any) => (
               <div key={m.id} className={`msg ${m.direction}`}>
                 {m.direction === "in" && m.sender_name && <div style={{ fontSize: 12, fontWeight: 600, opacity: 0.7 }}>{m.sender_name}</div>}
+                {m.subject && <div style={{ fontSize: 12, fontWeight: 600, opacity: 0.85, marginBottom: 2 }}>✉ {m.subject}</div>}
                 <div style={{ whiteSpace: "pre-wrap" }}>{m.body}</div>
                 {m.direction === "out" && m.delivery_status !== "sent" && <div style={{ fontSize: 12, marginTop: 4 }}>{m.delivery_status === "pending" ? "Sending…" : `⚠ Not delivered: ${m.error ?? "unknown error"}`}</div>}
               </div>))}

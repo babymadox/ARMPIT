@@ -43,6 +43,15 @@ export const automationSchema = z.object({
   template: z.enum(["silent_partner", "no_reply", "cap_reached", "volume_drop"]),
   threshold: optNum(1, 365),
 });
+export const emailConnectSchema = z.object({
+  email: z.string().trim().toLowerCase().email("enter the full email address").max(200),
+  password: z.string().min(1, "enter the password").max(200),
+  username: optStr(200), imap_host: optStr(200), smtp_host: optStr(200),
+  imap_port: optInt(1), smtp_port: optInt(1),
+}).superRefine((d, ctx) => {
+  if (d.imap_port != null && ![993, 143].includes(d.imap_port)) ctx.addIssue({ code: "custom", path: ["imap_port"], message: "use 993 (or 143)" });
+  if (d.smtp_port != null && ![465, 587].includes(d.smtp_port)) ctx.addIssue({ code: "custom", path: ["smtp_port"], message: "use 465 (or 587)" });
+});
 export const agentSchema = z.object({
   question: z.string().trim().min(2, "ask a question").max(1000),
   history: z.array(z.object({ role: z.enum(["user", "assistant"]), content: z.string().max(4000) })).max(12).default([]),

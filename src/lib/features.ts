@@ -9,7 +9,7 @@ export type Feature = { id: string; area: string; name: string; status: FeatureS
 
 export const FEATURES: Feature[] = [
   { id: "auth", area: "Core", name: "Sign-in, workspaces, roles", status: "done", needs: ["env.service_role"], evidence: "auth.members" },
-  { id: "invites", area: "Core", name: "Team invites (email, resend, revoke, accept page)", status: "done", needs: ["env.service_role"], evidence: "invites.sent" },
+  { id: "invites", area: "Core", name: "Team invites (link, optional email from your mailbox, resend, revoke, accept page)", status: "done", needs: ["env.service_role"], evidence: "invites.sent" },
   { id: "partners", area: "Partners", name: "Partners list, pipeline, detail, notes", status: "done", evidence: "partners.exist" },
   { id: "singular.connect", area: "Singular", name: "Connect Singular (key check, Vault)", status: "done", needs: ["schema.vault"], evidence: "singular.connected" },
   { id: "singular.sync", area: "Singular", name: "Sync stats (14 metrics per source/agency pair)", status: "done", needs: ["schema.sources"], evidence: "singular.sync" },
@@ -24,7 +24,7 @@ export const FEATURES: Feature[] = [
   { id: "inbox.live", area: "Inbox", name: "Inbox live refresh", status: "done", manual: true, verifiedManually: "2026-11-16 (confirmed by the owner)", note: "Open the inbox in two windows, send a Telegram message, and check it appears without a refresh" },
   { id: "chan.whatsapp", area: "Inbox", name: "WhatsApp", status: "not-built", note: "Needs a Meta business account and a dedicated phone number" },
   { id: "chan.teams", area: "Inbox", name: "Microsoft Teams", status: "not-built", note: "Needs an Azure app registration and tenant admin consent" },
-  { id: "chan.gmail", area: "Inbox", name: "Gmail", status: "not-built", note: "Needs a Google Cloud project with OAuth consent" },
+  { id: "chan.email", area: "Inbox", name: "Email: any mailbox (Gmail, Outlook, Yahoo, company) over IMAP/SMTP", status: "done", needs: ["schema.email"], evidence: "email.received" },
   { id: "chan.linkedin", area: "Inbox", name: "LinkedIn", status: "not-built", note: "LinkedIn messaging is restricted to approved partners" },
   { id: "trk.others", area: "Trackers", name: "Cellxpert, Affise, Affilka, Voonix, AppsFlyer", status: "not-built", note: "Each needs API access and documentation for that account" },
   { id: "agent", area: "AI", name: "Ask ARMPIT (AI agent)", status: "done", needs: ["env.anthropic"], evidence: "agent.answered" },

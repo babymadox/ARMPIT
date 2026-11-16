@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import { syncConnection } from "@/lib/sync";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { logEvent } from "@/lib/log";
+import { pollConnection } from "@/lib/mail";
 
 // Scheduled (Vercel Cron). Pulls the last 2 days for every connection; one failing connection never blocks the rest.
 export async function GET(req: Request) {
@@ -12,6 +13,12 @@ export async function GET(req: Request) {
   for (const c of conns!) {
     try { out.push({ id: c.id, ok: true, rows: (await syncConnection("all-orgs", c.id)).rows }); }
     catch (e) { console.error("sync failed", c.kind, e); out.push({ id: c.id, ok: false, error: e instanceof Error ? e.message : String(e) }); }
+  }
+  // Mailboxes: the oldest-checked first, a handful per run so the job stays inside its time limit.
+  const { data: boxes } = await supabaseAdmin().from("channel_connections").select("id").eq("kind", "email").eq("status", "connected").order("last_polled_at", { ascending: true, nullsFirst: true }).limit(8);
+  for (const b of boxes ?? []) {
+    try { out.push({ id: b.id, ok: true, rows: (await pollConnection("all-orgs", b.id, { minIntervalSec: 0 })).imported }); }
+    catch (e) { out.push({ id: b.id, ok: false, error: e instanceof Error ? e.message : String(e) }); }
   }
   const failed = out.filter((r) => !r.ok).length;
   await logEvent({ level: failed ? "warn" : "info", source: "cron.sync-trackers", message: `${out.length} connection(s), ${failed} failed`, details: { results: out.map((r) => ({ ok: r.ok, rows: r.rows })) } });
