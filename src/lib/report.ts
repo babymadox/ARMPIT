@@ -17,6 +17,7 @@ export function effective(f: Feature, r: Report): { status: EffectiveStatus; why
   const failing = (f.needs ?? []).map((id) => r.checks.find((c) => c.id === id)).filter((c) => c && c.status === "fail");
   if (failing.length) return { status: "blocked", why: failing.map((c) => c!.label).join("; ") };
   if (f.status === "partial") return { status: "partial", why: f.note };
+  if (f.manual && f.verifiedManually) return { status: "working", why: `confirmed manually ${f.verifiedManually}` };
   if (f.manual) return { status: "built-unproven", why: f.note ?? "needs a manual check" };
   if (f.evidence) { const e = r.evidence.find((x) => x.id === f.evidence); return e?.at ? { status: "working" } : { status: "built-unproven", why: "no run recorded yet" }; }
   return { status: "working" };

@@ -82,3 +82,26 @@ form.row,.toolbar{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin
 th a{color:inherit}th a:hover{color:var(--brand)}th.sorted{color:var(--brand)}.num{text-align:right;font-variant-numeric:tabular-nums}th.num{text-align:right}
 .scroll{overflow-x:auto}
 .btn{display:inline-block;padding:9px 14px;border:1px solid var(--line);border-radius:10px;background:var(--card);font-weight:500;user-select:none}.btn:hover{background:var(--bg)}details[open]>.btn{border-color:var(--brand);box-shadow:0 0 0 3px color-mix(in srgb,var(--brand) 22%,transparent)}
+
+/* inbox: fills the window; the list and the messages scroll inside their own panes */
+.inbox{display:flex;flex-direction:column;height:calc(100dvh - 96px);min-height:520px}
+.inbox .phead{margin-bottom:14px}
+.channel-strip{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:14px}
+.inbox .split{flex:1;min-height:0;align-items:stretch;grid-template-rows:minmax(0,1fr)}
+.inbox .split>.card{min-height:0;overflow:hidden;display:flex;flex-direction:column}
+.convlist{flex:1;min-height:0;overflow-y:auto;margin:0 -8px;padding:0 8px}
+.thread{min-height:0;gap:0}
+.thread-head{flex:none;padding-bottom:12px;margin-bottom:10px;border-bottom:1px solid var(--line);gap:10px}
+.msgs{flex:1;min-height:0;overflow-y:auto;display:flex;flex-direction:column;gap:6px;padding:4px 6px 8px;margin:0 -6px;overscroll-behavior:contain}
+.msgs .msg{width:fit-content;align-self:flex-start;overflow-wrap:anywhere}.msgs .msg.out{align-self:flex-end;margin-left:0}
+.composer{flex:none;margin:10px 0 0}
+.back-chats{display:none;color:var(--brand);font-weight:500;margin-bottom:6px}
+@media(max-width:900px){
+  /* phone: list OR thread (never both), each fills the screen; nothing scrolls but the panes */
+  .inbox{height:calc(100dvh - 156px);min-height:460px}
+  .inbox .split{grid-template-columns:1fr;grid-template-rows:minmax(0,1fr)}
+  .inbox .split.mobile-thread>.card:first-child{display:none}
+  .inbox .split.mobile-list>.thread{display:none}
+  .back-chats{display:inline-block}
+  .inbox form.composer{flex-wrap:nowrap}
+}

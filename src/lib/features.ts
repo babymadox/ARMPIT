@@ -5,7 +5,7 @@
  * `evidence`, or `manual: true` when nothing can prove it automatically (it then shows as built-unproven).
  */
 export type FeatureStatus = "done" | "partial" | "not-built";
-export type Feature = { id: string; area: string; name: string; status: FeatureStatus; note?: string; needs?: string[]; evidence?: string; manual?: boolean };
+export type Feature = { id: string; area: string; name: string; status: FeatureStatus; note?: string; needs?: string[]; evidence?: string; manual?: boolean; verifiedManually?: string };
 
 export const FEATURES: Feature[] = [
   { id: "auth", area: "Core", name: "Sign-in, workspaces, roles", status: "done", needs: ["env.service_role"], evidence: "auth.members" },
@@ -21,7 +21,7 @@ export const FEATURES: Feature[] = [
   { id: "automations", area: "Automations", name: "Automations (silent-partner trigger only)", status: "partial", note: "Other triggers are not built", evidence: "automations.run" },
   { id: "telegram.in", area: "Inbox", name: "Telegram: receive messages", status: "done", needs: ["schema.delivery"], evidence: "telegram.inbound" },
   { id: "telegram.out", area: "Inbox", name: "Telegram: send replies", status: "done", needs: ["schema.delivery", "schema.secrets"], evidence: "reply.delivered" },
-  { id: "inbox.live", area: "Inbox", name: "Inbox live refresh", status: "done", manual: true, note: "Open the inbox in two windows, send a Telegram message, and check it appears without a refresh" },
+  { id: "inbox.live", area: "Inbox", name: "Inbox live refresh", status: "done", manual: true, verifiedManually: "2026-11-16 (confirmed by the owner)", note: "Open the inbox in two windows, send a Telegram message, and check it appears without a refresh" },
   { id: "chan.whatsapp", area: "Inbox", name: "WhatsApp", status: "not-built" },
   { id: "chan.teams", area: "Inbox", name: "Microsoft Teams", status: "not-built" },
   { id: "chan.gmail", area: "Inbox", name: "Gmail", status: "not-built" },

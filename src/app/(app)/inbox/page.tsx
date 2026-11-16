@@ -7,6 +7,7 @@ import { supabaseAdmin } from "@/lib/supabase/admin";
 import { ago } from "@/lib/format";
 import { Avatar, Icon, PageHeader } from "@/components/ui";
 import { LiveRefresh } from "@/components/LiveRefresh";
+import { MessageList } from "@/components/MessageList";
 import { errMsg, logEvent } from "@/lib/log";
 
 export const maxDuration = 30;
@@ -91,10 +92,13 @@ export default async function Inbox({ searchParams }: { searchParams: Promise<{ 
     : [{ data: [] }, { data: [] }];
 
   return (
-    <>
+    <div className="inbox">
       <LiveRefresh />
       <PageHeader title="Inbox" sub="Every partner conversation, from every channel" />
       {loadError && <div className="notice" role="alert" style={{ borderColor: "var(--bad)" }}><b>Part of the inbox could not load.</b> {loadError.message}. This usually means a database update is pending: run <code>supabase/catch-up.sql</code> (or migration 7) in the Supabase SQL editor.</div>}
+      {chats.length ? (
+        <div className="channel-strip" aria-label="Channels">{CHANNELS.map((x) => <span key={x.k} className={`pill${connected.has(x.k as any) ? " ok" : ""}`} title={connected.has(x.k as any) ? "Connected" : x.live ? "Not connected: connect it in Settings → Channels" : "API setup required"}>{x.n}{connected.has(x.k as any) ? " ✓" : ""}</span>)}<Link className="pill" href="/settings#channels">Manage channels</Link></div>
+      ) : (
       <div className="channels" style={{ marginBottom: 22 }}>
         {CHANNELS.map((x) => (
           <div className="card channel" key={x.k}>
@@ -106,22 +110,23 @@ export default async function Inbox({ searchParams }: { searchParams: Promise<{ 
                 : <><span className="pill warn" style={{ alignSelf: "flex-start" }}>API setup required</span><button disabled title="This channel's API connection has not been set up yet" style={{ opacity: 0.55, cursor: "not-allowed" }}>Connect</button></>}
           </div>))}
       </div>
+      )}
       {!chats.length ? (
         <div className="empty"><span className="stat-ic brand"><Icon name="chat" size={22} /></span><b>No conversations yet</b>
           <p>{connected.size ? "New messages appear here as they arrive. Add the bot to a partner group and send a message." : "Connect a channel above. Messages appear here once it is connected."}</p></div>
       ) : (
-        <div className="split">
+        <div className={`split ${c ? "mobile-thread" : "mobile-list"}`}>
           <div className="card">
             <div className="toolbar" style={{ marginBottom: 8 }}>{CHANNELS.map((k) => <Link key={k.k} className={`pill${ch === k.k ? " ok" : ""}`} href={`/inbox?ch=${k.k}`}>{k.n}</Link>)}{ch && <Link className="pill" href="/inbox">All</Link>}</div>
-            {chats.map((x: any) => (
+            <div className="convlist">{chats.map((x: any) => (
               <Link key={x.id} href={`/inbox?c=${x.id}${ch ? `&ch=${ch}` : ""}`} className={`convo${x.unread && x.id !== open ? " unread" : ""}`}>
                 <Avatar name={x.partner?.name ?? x.title ?? "?"} /><div><b>{x.partner?.name ?? x.title}</b><div className="mut" style={{ fontSize: 12 }}>{x.channel} · {ago(x.last_message_at)}</div></div>
-              </Link>))}
+              </Link>))}</div>
           </div>
           <div className="card thread">
             {current && (
-              <div className="between" style={{ marginBottom: 8, flexWrap: "wrap" }}>
-                <div><b>{current.title ?? current.partner?.name}</b><div className="mut" style={{ fontSize: 13 }}>{current.channel}{current.partner ? ` · partner: ${current.partner.name}` : ""}</div></div>
+              <div className="between thread-head" style={{ flexWrap: "wrap" }}>
+                <div><Link className="back-chats" href={ch ? `/inbox?ch=${ch}` : "/inbox"}>← Chats</Link><div><b>{current.title ?? current.partner?.name}</b><div className="mut" style={{ fontSize: 13 }}>{current.channel}{current.partner ? ` · partner: ${current.partner.name}` : ""}</div></div></div>
                 {isAdmin && (
                   <div className="row" style={{ margin: 0 }}>
                     <form action={setPartner} className="row" style={{ margin: 0 }}><input type="hidden" name="c" value={current.id} />
@@ -130,16 +135,18 @@ export default async function Inbox({ searchParams }: { searchParams: Promise<{ 
                       <select name="owner" defaultValue={current.owner_id ?? ""} aria-label="Assigned to">{(members ?? []).map((m: any) => <option key={m.id} value={m.id}>{m.full_name ?? m.email}</option>)}</select><button>Assign</button></form>
                   </div>)}
               </div>)}
+            <MessageList conversationId={open ?? ""} lastId={msgs.length ? String(msgs[msgs.length - 1].id) : ""}>
             {msgs.map((m: any) => (
               <div key={m.id} className={`msg ${m.direction}`}>
                 {m.direction === "in" && m.sender_name && <div style={{ fontSize: 12, fontWeight: 600, opacity: 0.7 }}>{m.sender_name}</div>}
                 <div style={{ whiteSpace: "pre-wrap" }}>{m.body}</div>
                 {m.direction === "out" && m.delivery_status !== "sent" && <div style={{ fontSize: 12, marginTop: 4 }}>{m.delivery_status === "pending" ? "Sending…" : `⚠ Not delivered: ${m.error ?? "unknown error"}`}</div>}
               </div>))}
-            {open && <form className="row" action={reply} style={{ marginTop: "auto" }}><input type="hidden" name="c" value={open} /><input name="body" style={{ flex: 1 }} placeholder="Write a reply" maxLength={4000} required /><button className="pri">Send</button></form>}
+            </MessageList>
+            {open && <form className="row composer" action={reply}><input type="hidden" name="c" value={open} /><input name="body" style={{ flex: 1 }} placeholder="Write a reply" maxLength={4000} required /><button className="pri">Send</button></form>}
           </div>
         </div>
       )}
-    </>
+    </div>
   );
 }

@@ -63,8 +63,10 @@ test("the markdown report has every section, shows the digest, and carries no se
 test("every feature marked done has automatic proof or is flagged for a manual check", () => {
   for (const f of FEATURES.filter((f) => f.status === "done")) assert.ok(f.evidence || f.manual, `${f.id} is done with no way to prove it`);
 });
-test("a manual-check feature is never reported as working", () => {
+test("a manual-check feature is 'working' only once a person has confirmed it, and says so", () => {
   const r = base({ checks: base().checks.map((c) => ({ ...c, status: "ok" as const })) });
   const e = effective(feat("inbox.live"), r);
-  assert.equal(e.status, "built-unproven"); assert.match(e.why!, /two windows/);
+  assert.equal(e.status, "working"); assert.match(e.why!, /confirmed manually/);
+  const unconfirmed = effective({ ...feat("inbox.live"), verifiedManually: undefined }, r);
+  assert.equal(unconfirmed.status, "built-unproven"); assert.match(unconfirmed.why!, /two windows/);
 });
