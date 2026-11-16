@@ -2,6 +2,7 @@ import { trackers } from "./integrations";
 import { readCreds } from "./secrets";
 import { supabaseAdmin } from "./supabase/admin";
 import { planImport, type Pair } from "./structure";
+import { errMsg, logEvent } from "./log";
 
 const iso = (ms: number) => new Date(ms).toISOString().slice(0, 10);
 const chunks = <T,>(a: T[], n = 1000) => Array.from({ length: Math.ceil(a.length / n) }, (_, i) => a.slice(i * n, i * n + n));
@@ -22,11 +23,12 @@ type Opts = {
  *  3. stores stats for linked pairs only. A pair carries its own numbers, so a source shared by two agencies
  *     is never double counted.
  */
-export async function syncConnection(scope: Scope, connectionId: string, days = 2, opts: Opts = {}) {
+async function syncCore(scope: Scope, connectionId: string, days: number, opts: Opts, ctx: { orgId?: string; kind?: string }) {
   const db = supabaseAdmin();
   const { data: c, error } = await db.from("tracker_connections").select("id,org_id,kind,vault_secret_id").eq("id", connectionId).single();
   if (error || !c) throw new Error("connection not found");
   if (scope !== "all-orgs" && c.org_id !== scope.orgId) throw new Error("connection not found");   // never act on another workspace's connection
+  ctx.orgId = c.org_id; ctx.kind = c.kind;
   const adapter = trackers[c.kind as keyof typeof trackers];
   let stats;
   try { stats = await adapter.fetchStats(await readCreds(c.vault_secret_id, c.org_id), iso(Date.now() - days * 864e5), iso(Date.now())); }
@@ -70,4 +72,17 @@ export async function syncConnection(scope: Scope, connectionId: string, days = 
   const { error: e5 } = await db.from("tracker_connections").update({ last_synced_at: now, status: "connected" }).eq("id", c.id);
   if (e5) throw new Error(`Could not record sync: ${e5.message}`);
   return { pairs: pairs.length, rows: rows.length, createdPartners, createdLinks };
+}
+
+/** Runs a sync and records the outcome (counts and duration on success, the scrubbed error on failure). */
+export async function syncConnection(scope: Scope, connectionId: string, days = 2, opts: Opts = {}) {
+  const ctx: { orgId?: string; kind?: string } = {}, t0 = Date.now();
+  try {
+    const r = await syncCore(scope, connectionId, days, opts, ctx);
+    await logEvent({ orgId: ctx.orgId, level: "info", source: `sync.${ctx.kind}`, message: `synced ${r.rows} rows from ${r.pairs} source/agency pairs`, details: { ...r, days, autoLink: !!opts.autoLink, ms: Date.now() - t0 } });
+    return r;
+  } catch (e) {
+    await logEvent({ orgId: ctx.orgId, level: "error", source: `sync.${ctx.kind ?? "unknown"}`, message: errMsg(e), details: { days, ms: Date.now() - t0 } });
+    throw e;
+  }
 }

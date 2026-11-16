@@ -7,6 +7,13 @@ description: Scan the whole ARMPIT project (Next.js + Supabase affiliate workspa
 
 Run in this order. Report findings as **Confirmed** (you saw it fail or read the code) vs **Suspected** (heuristic hit). Never call something verified that you only read.
 
+## 0. Read the app's own diagnostics first
+The deployed app records what works and what fails. Before reading code, get the report:
+- Ask the user to open **Settings → Diagnostics → Copy report** and paste it, or
+- fetch it directly: `curl -H "Authorization: Bearer $CRON_SECRET" "https://<site>/api/diagnostics?format=md"`
+  (needs the site host allowed in the cloud environment's network settings and the secret saved with `request_credential`; never ask for it in chat).
+It lists failing environment/database/integration checks, each feature as working / built-unproven / blocked / partial / not-built, when things were last proven working, and recent errors with their digest (the reference on the "Application error" page). Trust it over memory; treat anything it marks `built-unproven` as unverified.
+
 ## 1. Run the automated pass
 ```bash
 bash .claude/skills/armpit-scan/scripts/scan.sh          # full: typecheck, tests, build, heuristics
@@ -33,7 +40,8 @@ It prints PASS / WARN / FAIL per check. Treat every WARN as a lead to read, not 
 7. **Writes check their result.** A failed insert/update/delete must surface as an error, never as a success message. Deliberate fire-and-forget writes carry a `best effort` comment (the scan enforces this).
 8. **Workspace scoping in code:** `syncConnection(scope, ...)` takes `{ orgId }` or `"all-orgs"` (cron only); `readCreds(secretId, orgId)` only returns secrets stored under that workspace. The DB trigger `enforce_same_org` blocks rows that point at another workspace's partner/member/connection.
 9. **Provider calls have timeouts** and map timeouts to readable messages; page loads must not wait on a slow provider.
-10. **Deletes that cascade** (unlinking an agency deletes its stats) must say so in the UI.
+10. **Logging:** notable events go through `logEvent` (never `console.log` of user data). `scrub`/`buildEventRow` strip tokens, keys and message text; keep it that way. Update `src/lib/features.ts` whenever a feature is built or its status changes: diagnostics reads it.
+11. **Deletes that cascade** (unlinking an agency deletes its stats) must say so in the UI.
 
 ## 4. Verification discipline
 - Run `npx tsc --noEmit`, `npm test`, and `NEXT_PUBLIC_SUPABASE_URL=http://x NEXT_PUBLIC_SUPABASE_ANON_KEY=x npx next build` after `rm -rf .next` (stale `.next` types cause false failures).

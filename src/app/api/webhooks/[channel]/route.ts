@@ -3,6 +3,7 @@ import { channels } from "@/lib/integrations";
 import { ingestMessages } from "@/lib/inbox";
 import { readCreds } from "@/lib/secrets";
 import { supabaseAdmin } from "@/lib/supabase/admin";
+import { errMsg, logEvent } from "@/lib/log";
 
 export const maxDuration = 30;
 
@@ -23,9 +24,12 @@ export async function POST(req: Request, { params }: { params: Promise<{ channel
 
   let msgs;
   try { msgs = await adapter.parseWebhook(req, await readCreds(conn.vault_secret_id, conn.org_id)); }
-  catch { return NextResponse.json({ error: "unauthorized" }, { status: 401 }); }   // bad secret: say nothing more
+  catch (e) {
+    await logEvent({ orgId: conn.org_id, level: "warn", source: `webhook.${channel}`, message: `delivery rejected: ${errMsg(e)}` });
+    return NextResponse.json({ error: "unauthorized" }, { status: 401 });   // bad secret: say nothing more
+  }
 
   try { await ingestMessages(db, conn, msgs); }
-  catch (e) { console.error("ingest failed", channel, e); return NextResponse.json({ error: "temporary failure" }, { status: 500 }); } // 5xx makes the provider retry
+  catch (e) { await logEvent({ orgId: conn.org_id, level: "error", source: `webhook.${channel}`, message: `ingest failed: ${errMsg(e)}`, details: { messages: msgs.length } }); return NextResponse.json({ error: "temporary failure" }, { status: 500 }); } // 5xx makes the provider retry
   return NextResponse.json({ ok: true });
 }

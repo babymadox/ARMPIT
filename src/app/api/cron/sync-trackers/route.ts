@@ -2,6 +2,7 @@ export const maxDuration = 60; // Singular reports are async; allow time to poll
 import { NextResponse } from "next/server";
 import { syncConnection } from "@/lib/sync";
 import { supabaseAdmin } from "@/lib/supabase/admin";
+import { logEvent } from "@/lib/log";
 
 // Scheduled (Vercel Cron). Pulls the last 2 days for every connection; one failing connection never blocks the rest.
 export async function GET(req: Request) {
@@ -12,5 +13,8 @@ export async function GET(req: Request) {
     try { out.push({ id: c.id, ok: true, rows: (await syncConnection("all-orgs", c.id)).rows }); }
     catch (e) { console.error("sync failed", c.kind, e); out.push({ id: c.id, ok: false, error: e instanceof Error ? e.message : String(e) }); }
   }
+  const failed = out.filter((r) => !r.ok).length;
+  await logEvent({ level: failed ? "warn" : "info", source: "cron.sync-trackers", message: `${out.length} connection(s), ${failed} failed`, details: { results: out.map((r) => ({ ok: r.ok, rows: r.rows })) } });
+  await supabaseAdmin().from("app_events").delete().lt("created_at", new Date(Date.now() - 30 * 864e5).toISOString()); // best effort: keep 30 days of events
   return NextResponse.json({ connections: out.length, results: out });
 }

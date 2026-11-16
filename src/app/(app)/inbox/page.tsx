@@ -7,6 +7,7 @@ import { supabaseAdmin } from "@/lib/supabase/admin";
 import { ago } from "@/lib/format";
 import { Avatar, Icon, PageHeader } from "@/components/ui";
 import { LiveRefresh } from "@/components/LiveRefresh";
+import { errMsg, logEvent } from "@/lib/log";
 
 export const maxDuration = 30;
 
@@ -26,7 +27,7 @@ async function reply(fd: FormData) {
   const { data: msg, error } = await db.from("messages").insert({ org_id: org.id, conversation_id: cid, direction: "out", sender_name: "You", body, delivery_status: "pending" }).select("id").single();
   if (error || !msg) throw new Error(error?.message ?? "Could not save the message");
   const admin = supabaseAdmin();
-  const fail = async (e: unknown) => { await admin.from("messages").update({ delivery_status: "failed", error: e instanceof Error ? e.message : String(e) }).eq("id", msg.id); /* best effort: the user sees the failure either way */ };
+  const fail = async (e: unknown) => { await logEvent({ orgId: org.id, level: "warn", source: "inbox.reply", message: `delivery failed: ${errMsg(e)}`, details: { channel: conv.channel } }); await admin.from("messages").update({ delivery_status: "failed", error: e instanceof Error ? e.message : String(e) }).eq("id", msg.id); /* best effort: the user sees the failure either way */ };
 
   // 1) Deliver. Only a failure HERE means "not delivered".
   let externalId: string;
@@ -43,7 +44,7 @@ async function reply(fd: FormData) {
   for (let i = 0; i < 2; i++) {
     const { error: upErr } = await admin.from("messages").update({ delivery_status: "sent", external_id: externalId }).eq("id", msg.id);
     if (!upErr) break;
-    if (i === 1) console.error("message delivered but status update failed", msg.id, upErr.message);
+    if (i === 1) await logEvent({ orgId: org.id, level: "error", source: "inbox.reply", message: `delivered but status update failed: ${errMsg(upErr.message)}`, details: { channel: conv.channel } });
   }
   await db.from("conversations").update({ last_message_at: new Date().toISOString(), unread: false }).eq("id", cid); // best effort: ordering hint only
   revalidatePath("/inbox");

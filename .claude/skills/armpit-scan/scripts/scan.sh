@@ -56,14 +56,16 @@ for f in ALL:
     if f.endswith(("package-lock.json", ".png", ".ico")): continue
     try: t = pathlib.Path(f).read_text()
     except Exception: continue
-    for m in pat.finditer(t): hits.append(f"{f}: {m.group(0)[:14]}…")
+    for m in pat.finditer(t):
+        if "FAKE" in m.group(0): continue          # deliberate test fixtures must say FAKE
+        hits.append(f"{f}: {m.group(0)[:14]}…")
 print(f"{G}  no token-shaped secrets in tracked or new files" if not hits else f"{R}  possible secrets in tracked or new files:\n    " + "\n    ".join(hits)); fails += bool(hits)
 envs = [f for f in ALL if re.search(r'(^|/)\.env($|\.(local|production))', f)]
 print(f"{G}  no .env files tracked" if not envs else f"{R}  .env files tracked: {envs}"); fails += bool(envs)
 
 # 5. tables without RLS
 mig = sorted(pathlib.Path("supabase/migrations").glob("*.sql")); allsql = "\n".join(p.read_text() for p in mig)
-tables = re.findall(r'create table (\w+)', allsql)
+tables = re.findall(r'create table (?:if not exists )?(\w+)', allsql)
 norls = [t for t in tables if not re.search(rf"alter table {t} enable row level security|'{t}'", allsql)]
 print(f"{G}  all {len(tables)} tables have RLS enabled" if not norls else f"{R}  tables without RLS: {norls}"); fails += bool(norls)
 
@@ -104,7 +106,16 @@ print(f"{G}  every syncConnection call names its scope (workspace or all-orgs)" 
 old = [f for f in files if re.search(r'readCreds\([^,()]*\)', pathlib.Path(f).read_text())]
 print(f"{G}  readCreds always receives a workspace id" if not old else f"{R}  readCreds called without a workspace id: {old}"); fails += bool(old)
 
-# 12. leftovers
+# 12. crash capture and redaction are in place
+ins = pathlib.Path("src/instrumentation.ts")
+okI = ins.exists() and "onRequestError" in ins.read_text()
+print(f"{G}  server errors are captured (instrumentation.ts onRequestError)" if okI else f"{R}  src/instrumentation.ts missing or has no onRequestError: crashes would not reach the event log"); fails += not okI
+lg = pathlib.Path("src/lib/log.ts"); okL = lg.exists() and "buildEventRow" in lg.read_text()
+print(f"{G}  events are redacted before they are stored (log.ts uses buildEventRow)" if okL else f"{R}  log.ts does not redact events"); fails += not okL
+raw = [f for f in files if re.search(r'from\("app_events"\)\s*\.insert', pathlib.Path(f).read_text().replace("\n", " ")) and not f.endswith("lib/log.ts")]
+print(f"{G}  app_events is only written through logEvent" if not raw else f"{R}  direct app_events inserts bypass redaction: {raw}"); fails += bool(raw)
+
+# 13. leftovers
 todo = sh(r"grep -rnE 'TODO|FIXME|VERIFY|XXX' src supabase --include=*.ts --include=*.tsx --include=*.sql | wc -l").strip()
 print(f"{Y}  {todo} TODO/FIXME/VERIFY markers (list: grep -rnE 'TODO|FIXME|VERIFY' src supabase)")
 stubs = sh(r"grep -rlE 'not implemented yet|is not set up yet' src | wc -l").strip()

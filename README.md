@@ -4,9 +4,14 @@ Production skeleton of the ARMPIT demo: a workspace for affiliate managers (unif
 
 **Stack:** Next.js 15 (App Router, server components + server actions) · Supabase (Postgres, Auth, Realtime, Vault) · TypeScript.
 
+## Diagnostics and event log
+
+The app records its own evidence. **Settings → Diagnostics** (admins) shows: environment and database checks (which migration is missing, which variable is unset), integration health (Singular, Telegram), each feature as working / built-unproven / blocked / partial / not-built, when each was last proven working, and recent errors with the **digest** shown on the "Application error" page. **Copy report** gives a Markdown report with no passwords, keys or message text, suitable for pasting into a chat. Operators can fetch it with `curl -H "Authorization: Bearer $CRON_SECRET" "https://<site>/api/diagnostics?format=md"`.
+Events live in `app_events` (migration 9), are redacted before storage (`src/lib/scrub.ts`) and are pruned after 30 days. Keep `src/lib/features.ts` current when you build something.
+
 ## Hosted Supabase
 
-The Supabase project (ref `nhnwzxttpncechcgqqvl`, ap-south-1) has migrations 1 to 4 applied. **Migrations 5 to 8 may not be applied yet** (`tracker_sources`, agency/source pairs + LinkedIn, message delivery status, workspace guards). `supabase/catch-up.sql` contains 5 to 8 in order for pasting into the SQL editor; run it once, and only if none of them has been applied. Run `npx supabase db push` or paste `supabase/migrations/20261114000005_tracker_sources.sql` into the SQL editor. `.env.example` points at it; add the service-role key yourself.
+The Supabase project (ref `nhnwzxttpncechcgqqvl`, ap-south-1) has migrations 1 to 4 applied. **Migrations 5 to 9 may not be applied yet.** Settings → Diagnostics shows exactly which are missing. `supabase/catch-up.sql` contains 5 to 9 in order; run it only if none of them has been applied (5 to 7 are not repeatable; 8 and 9 are). Run `npx supabase db push` or paste `supabase/migrations/20261114000005_tracker_sources.sql` into the SQL editor. `.env.example` points at it; add the service-role key yourself.
 
 ## Run it locally
 

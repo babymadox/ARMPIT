@@ -7,6 +7,7 @@ import { trackers as adapters, channels } from "@/lib/integrations";
 import { readCreds, storeCreds } from "@/lib/secrets";
 import { siteOrigin, webhookUrl } from "@/lib/site";
 import { PageHeader } from "@/components/ui";
+import { errMsg, logEvent } from "@/lib/log";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 
 async function connectTracker(fd: FormData) {
@@ -20,6 +21,7 @@ async function connectTracker(fd: FormData) {
   const secret = await storeCreds(`${org.id}:${kind}`, creds);
   const { error } = await supabaseAdmin().from("tracker_connections").insert({ org_id: org.id, kind, label: String(fd.get("label") || kind), vault_secret_id: secret });
   if (error) return back(`Could not save the connection: ${error.message}`);
+  await logEvent({ orgId: org.id, level: "info", source: "tracker.connect", message: `${kind} connected` });
   revalidatePath("/settings");
 }
 
@@ -44,8 +46,10 @@ async function connectTelegram(fd: FormData) {
     if (upErr) throw new Error(upErr.message);
   } catch (e) {
     await db.from("channel_connections").delete().eq("id", row.id);          // best effort: no half-connected state
+    await logEvent({ orgId: org.id, level: "warn", source: "channel.telegram", message: `connect failed: ${errMsg(e)}` });
     return back(`Could not connect: ${e instanceof Error ? e.message : e}`);
   }
+  await logEvent({ orgId: org.id, level: "info", source: "channel.telegram", message: "connected" });
   revalidatePath("/settings"); revalidatePath("/inbox");
   back("Telegram connected. Now add the bot to a partner group and send a message.");
 }
@@ -57,6 +61,7 @@ async function disconnectTelegram(fd: FormData) {
   const id = String(fd.get("id"));
   const { data: c } = await db.from("channel_connections").select("id,vault_secret_id").eq("id", id).maybeSingle();
   if (c) { try { await channels.telegram.disconnect(await readCreds(c.vault_secret_id, org.id)); } catch { /* best effort */ } const { error } = await db.from("channel_connections").delete().eq("id", id); if (error) return back(`Could not disconnect: ${error.message}`); }
+  await logEvent({ orgId: org.id, level: "info", source: "channel.telegram", message: "disconnected" });
   revalidatePath("/settings"); revalidatePath("/inbox");
   back("Telegram disconnected. Existing conversations are kept.");
 }
@@ -107,6 +112,8 @@ export default async function Settings({ searchParams }: { searchParams: Promise
         ) : <p className="mut">Ask an admin to connect Telegram.</p>}
       </div>
       <p className="mut" style={{ fontSize: 13 }}>WhatsApp, Microsoft Teams, Gmail and LinkedIn are not connected yet.</p>
+      <h2>Diagnostics</h2>
+      <div className="card between"><span className="mut">Checks the database setup, settings and integrations, and shows what has been proven to work.</span><Link href="/settings/diagnostics"><button>Open diagnostics</button></Link></div>
       <h2>Billing</h2><div className="card mut">TODO: Stripe Checkout and customer portal, driven by seats.</div>
       {isAdmin && <><h2>Audit log</h2><div className="card">{audit!.map((a: any) => <div key={a.id}>{a.action} <span className="mut">{a.entity}</span></div>)}</div></>}
     </>
