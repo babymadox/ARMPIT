@@ -32,5 +32,7 @@
     "@types/smtp-server": "^3.5.13",
     "smtp-server": "^3.21.6",
     "typescript": "^5.7.0"
-  }
+  },
+  "license": "UNLICENSED",
+  "author": "babymadox"
 }

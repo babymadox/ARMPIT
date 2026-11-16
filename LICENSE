@@ -1,0 +1,66 @@
+ARMPIT PROPRIETARY SOFTWARE LICENCE
+
+Copyright (c) 2026 babymadox. All rights reserved.
+
+ARMPIT (the "Software") includes all source code, database schemas and migrations,
+configuration, scripts, tests, documentation, designs, logos and other materials in
+this repository, and every copy, extract, translation or derivative of any of them.
+"Copyright Holder" means babymadox (https://github.com/babymadox) and any person or
+company to which the Copyright Holder assigns these rights in writing.
+
+THE SOFTWARE IS CONFIDENTIAL AND PROPRIETARY. NO LICENCE OR OTHER RIGHT IS GRANTED
+BY THE FACT THAT YOU CAN SEE, DOWNLOAD, CLONE, FORK OR RECEIVE THE SOFTWARE, BY ANY
+HOSTING SERVICE'S TERMS, OR BY THE ABSENCE OF A TECHNICAL RESTRICTION.
+
+1. NO PERMISSION WITHOUT WRITTEN CONSENT
+   Unless the Copyright Holder has given you explicit written permission, you must not,
+   in whole or in part and by any means:
+   (a) copy, reproduce, mirror, scrape, archive or store the Software;
+   (b) modify, adapt, translate, port, or create derivative works of the Software;
+   (c) distribute, publish, post, upload, sell, rent, lease, lend, sublicense, transfer
+       or otherwise make the Software available to any other person;
+   (d) run, host, deploy or operate the Software, or offer it or anything derived from it
+       as a product or service, for any purpose, including internal, personal, evaluation,
+       educational or non-profit use;
+   (e) decompile, reverse engineer or attempt to extract the source code, structure or
+       algorithms of any compiled, bundled or hosted form of the Software;
+   (f) use the Software, or any text, code, data or output taken from it, to train,
+       fine-tune, evaluate or prompt a machine-learning model, or to build a product that
+       competes with the Software;
+   (g) remove, obscure or alter any copyright, licence or proprietary notice.
+
+2. AUTHORISED ACCESS
+   Where the Copyright Holder has expressly given you access to a private copy of the
+   Software (for example as a collaborator or contractor), you may use it only for the
+   specific purpose and period for which access was granted, must keep it confidential,
+   and must delete all copies when that access ends. Access is personal and may not be
+   shared or transferred.
+
+3. HOW TO GET PERMISSION
+   Ask the Copyright Holder through the GitHub profile above. Permission is valid only
+   if it is in writing, identifies you and the use it covers, and comes from the
+   Copyright Holder. It covers only what it says. Silence, delay, lack of enforcement,
+   or a technical ability to copy the Software is never permission.
+
+4. THIRD-PARTY COMPONENTS
+   The Software depends on open-source components that remain under their own licences,
+   listed in THIRD_PARTY_NOTICES.md. This licence does not apply to them and does not
+   limit any right you have under their licences for those components.
+
+5. NO WARRANTY
+   THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED,
+   INCLUDING WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
+   NON-INFRINGEMENT. TO THE FULLEST EXTENT PERMITTED BY LAW, THE COPYRIGHT HOLDER IS NOT
+   LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY ARISING FROM THE SOFTWARE OR ITS USE.
+
+6. TERMINATION AND REMEDIES
+   Any breach of this licence ends all permissions immediately and automatically. You
+   must then stop all use and delete every copy. Unauthorised use infringes the
+   Copyright Holder's copyright and may lead to legal action, injunctions, damages and
+   recovery of costs, to the fullest extent the law allows. The Copyright Holder may
+   report infringing copies to hosting services (for example under the US DMCA) and
+   have them removed.
+
+7. GENERAL
+   If any part of this licence is unenforceable, the rest stays in force. A waiver is
+   effective only in writing. Nothing here transfers ownership of any right to you.

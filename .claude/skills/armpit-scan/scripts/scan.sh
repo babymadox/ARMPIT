@@ -115,6 +115,13 @@ print(f"{G}  events are redacted before they are stored (log.ts uses buildEventR
 raw = [f for f in files if re.search(r'from\("app_events"\)\s*\.insert', pathlib.Path(f).read_text().replace("\n", " ")) and not f.endswith("lib/log.ts")]
 print(f"{G}  app_events is only written through logEvent" if not raw else f"{R}  direct app_events inserts bypass redaction: {raw}"); fails += bool(raw)
 
+# 12b. the proprietary licence and copyright notices must not disappear
+import json as _json
+lic = pathlib.Path("LICENSE"); rd = pathlib.Path("README.md"); pj = _json.loads(pathlib.Path("package.json").read_text())
+legal = [lic.exists() and "All rights reserved" in lic.read_text() and "NO PERMISSION WITHOUT WRITTEN CONSENT" in lic.read_text(), rd.exists() and "All rights reserved" in rd.read_text() and "## Copyright and licence" in rd.read_text(),
+         pathlib.Path("THIRD_PARTY_NOTICES.md").exists(), pj.get("license") == "UNLICENSED"]
+print(f"{G}  copyright notices in place (LICENSE, README, THIRD_PARTY_NOTICES, package.json UNLICENSED)" if all(legal) else f"{R}  legal notices missing or weakened: LICENSE={legal[0]} README={legal[1]} THIRD_PARTY_NOTICES={legal[2]} package.json={legal[3]}"); fails += not all(legal)
+
 # 13. Supabase silently caps every plain select at 1000 rows. A .limit() above that is a bug (it returns 1000 and no error);
 #     reads that need everything must page with fetchAll() or aggregate in SQL (rpc).
 caps = []

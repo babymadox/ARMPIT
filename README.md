@@ -1,5 +1,9 @@
 # ARMPIT
 
+> **© 2026 babymadox. All rights reserved. Proprietary and confidential.**
+> No permission is given to copy, modify, host, run, distribute or use this code, in whole or in part, without the copyright holder's **explicit written permission**. See [LICENSE](LICENSE) and [Copyright and licence](#copyright-and-licence).
+
+
 Production skeleton of the ARMPIT demo: a workspace for affiliate managers (unified inbox, partners and tracker stats, deals, payment reconciliation, tasks, automations, team).
 
 **Stack:** Next.js 15 (App Router, server components + server actions) · Supabase (Postgres, Auth, Realtime, Vault) · TypeScript.
@@ -77,3 +81,26 @@ psql "postgresql://postgres:postgres@127.0.0.1:54322/postgres" -f supabase/seed.
 2. Environment variables: `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`, `CRON_SECRET`.
 3. Supabase → Authentication → URL Configuration: set Site URL to the Vercel URL and add it to Redirect URLs.
 4. `vercel.json` crons run daily so the Hobby plan accepts them; on Pro, raise the frequency (sync hourly, automations every 15 min) and `maxDuration`.
+
+## Copyright and licence
+
+**Copyright © 2026 babymadox. All rights reserved.**
+
+ARMPIT is proprietary software. This repository is visible to you for the sole purpose of authorised review; that is **not** a licence.
+
+**Without the copyright holder's explicit written permission you may not:**
+- copy, mirror, fork for reuse, scrape or store this code or any part of it;
+- modify it or build anything derived from it;
+- publish, share, sell, sublicense or otherwise give it to anyone else;
+- run, host or deploy it, or offer it as a product or service, for any purpose;
+- reverse engineer it, or remove any copyright or licence notice;
+- use it, or text or data taken from it, to train or prompt machine-learning models or to build a competing product.
+
+The full terms are in [LICENSE](LICENSE). Breach ends any permission automatically and may lead to legal action and takedown requests to hosting services.
+
+**Asking for permission:** write to the copyright holder through [github.com/babymadox](https://github.com/babymadox). Permission only counts if it is in writing, names you and the use, and comes from the copyright holder. Silence or a technical ability to copy is never permission.
+
+**Third-party software:** ARMPIT is built on open-source components that remain under their own licences (all permissive, or used without affecting ARMPIT's own code). They are listed in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md). The licence above does not apply to them.
+
+**Name and branding:** "ARMPIT", the ARMPIT logo and the product design are used by the copyright holder. No trademark or brand licence is granted.
+
